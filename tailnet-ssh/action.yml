@@ -1,0 +1,43 @@
+name: Tailnet SSH
+description: >-
+  Joins the tailnet as an ephemeral node for the rest of the job, without root,
+  and writes an SSH config for connecting to one host over it with the host
+  key pinned. Leaves the tailnet when the job ends.
+
+inputs:
+  oauth-secret:
+    description: >-
+      Secret of a Tailscale OAuth client that can create auth keys for the tags
+      in `tags`.
+    required: true
+  tags:
+    description: Comma-separated tags for the node, such as `tag:ci-platform-deploy`.
+    required: true
+  version:
+    description: Exact Tailscale release to run, such as `1.98.9`.
+    required: true
+  sha256:
+    description: >-
+      SHA-256 checksum of `tailscale_<version>_<arch>.tgz` from
+      pkgs.tailscale.com, as published in the `.sha256` file next to it.
+    required: true
+  host:
+    description: Tailnet hostname or address of the SSH server.
+    required: true
+  host-fingerprint:
+    description: >-
+      SHA256 fingerprint of the server's ed25519 host key, as `SHA256:<base64>`
+      or the base64 body alone.
+    required: true
+
+outputs:
+  ssh-config:
+    description: >-
+      Path of an SSH config file for `ssh -F`. With it, ssh connects through the
+      tailnet and accepts only the pinned host key.
+
+runs:
+  using: node24
+  main: main.js
+  post: post.js
+  post-if: always()
