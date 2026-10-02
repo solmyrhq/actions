@@ -46,11 +46,17 @@ function validateTags(tags) {
 }
 
 function validateVersion(version) {
-  const match = /^(?:0|[1-9]\d*)\.(0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.exec(version);
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.exec(version);
   if (match === null) {
     throw new Error("version must be an exact Tailscale release such as '1.98.9'.");
   }
-  if (Number(match[1]) % 2 !== 0) {
+  const [major, minor] = [Number(match[1]), Number(match[2])];
+  // main.js passes an OAuth client secret as `--auth-key`. Before Tailscale 1.40,
+  // `tailscale up` named that flag `--authkey` and could not resolve a client secret.
+  if (major < 1 || (major === 1 && minor < 40)) {
+    throw new Error(`version ${version} is older than Tailscale 1.40. Use Tailscale 1.40 or later.`);
+  }
+  if (minor % 2 !== 0) {
     throw new Error(`version ${version} is an unstable Tailscale build. Use a stable release, which has an even minor version.`);
   }
   return version;

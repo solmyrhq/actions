@@ -47,6 +47,8 @@ test("malformed inputs and unpinned or unstable versions are refused", () => {
   assert.throws(() => lib.validateVersion("latest"));
   assert.throws(() => lib.validateVersion("1.99.0"), /unstable/);
   assert.throws(() => lib.validateVersion("1.098.9"));
+  assert.throws(() => lib.validateVersion("1.38.0"), /older than Tailscale 1.40/);
+  assert.equal(lib.validateVersion("1.40.0"), "1.40.0");
   assert.equal(lib.validateVersion("1.98.9"), "1.98.9");
   assert.throws(() => lib.validateHost("-oProxyCommand=evil"));
   assert.throws(() => lib.validateSha256("abc"));

@@ -48,7 +48,7 @@ function startDaemon(command, args, log) {
 }
 
 async function download(url, sha256, destination) {
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
   if (!response.ok) {
     throw new Error(`Downloading ${url} failed: HTTP ${response.status}.`);
   }
