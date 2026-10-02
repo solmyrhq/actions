@@ -1,0 +1,22 @@
+name: Test
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+permissions:
+    contents: read
+
+jobs:
+    test:
+        name: Unit tests
+        runs-on: self-hosted
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
+            # The runners have no Node for steps to use. The container's Node
+            # matches the actions' `using: node24`.
+            - run: docker run --rm -v "$PWD:/work:ro" -w /work node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe node --test
