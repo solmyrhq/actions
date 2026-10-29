@@ -42,10 +42,30 @@ test("only the job that runs no model can write", () => {
   assert.doesNotMatch(job("publish"), /opencode" run|OPENROUTER_API_KEY/);
 });
 
-test("the OpenRouter key reaches only the step that runs the model", () => {
+// Returns the text of one step of the review job, from its `- name:` line up to the next step's.
+function step(name) {
+  const text = job("review");
+  const start = text.indexOf(`- name: ${name}\n`);
+  assert.notEqual(start, -1, `no step named ${name}`);
+  const next = text.indexOf("\n            - name: ", start + 1);
+  return next === -1 ? text.slice(start) : text.slice(start, next);
+}
+
+test("the OpenRouter key reaches only the step that writes it to a file", () => {
   const uses = TEXT.match(/secrets\.OPENROUTER_API_KEY/g) ?? [];
   assert.equal(uses.length, 1);
-  assert.match(job("review"), /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}\n[\s\S]*?opencode" run/);
+  assert.match(step("Write the OpenRouter key"), /secrets\.OPENROUTER_API_KEY/);
+});
+
+test("the step that runs the model has no OpenRouter key in its environment", () => {
+  const review = step("Review the pull request");
+  assert.match(review, /opencode" run/);
+  assert.doesNotMatch(review, /OPENROUTER_API_KEY/);
+  assert.ok(review.includes('"{file:$key_file}"'), "OpenCode does not read the key from the file");
+});
+
+test("the key file is removed with the rest of OpenCode's state", () => {
+  assert.match(step("Remove OpenCode and its state"), /"\$RUNNER_TEMP\/opencode-secrets"/);
 });
 
 test("a pull request from a fork or a draft is not reviewed", () => {
