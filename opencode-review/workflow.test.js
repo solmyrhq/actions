@@ -85,8 +85,10 @@ test("OpenCode skips the pull request's .claude, .agents and CLAUDE.md", () => {
   assert.match(review, /OPENCODE_DISABLE_CLAUDE_CODE: "1"/);
 });
 
-test("the key file is removed with the rest of OpenCode's state", () => {
-  assert.match(step("Remove OpenCode and its state"), /"\$RUNNER_TEMP\/opencode-secrets"/);
+test("the key file is removed with the rest of OpenCode's state, even after a failure", () => {
+  const cleanup = step("Remove OpenCode and its state");
+  assert.match(cleanup, /\n {14}if: always\(\)\n/);
+  assert.match(cleanup, /"\$RUNNER_TEMP\/opencode-secrets"/);
 });
 
 test("a pull request from a fork or a draft is not reviewed", () => {
