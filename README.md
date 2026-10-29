@@ -26,3 +26,13 @@ This action joins the tailnet as an ephemeral node for the rest of the job and w
 `sha256` is the checksum of the tarball for the runner's architecture. Tailscale publishes it at `https://pkgs.tailscale.com/stable/tailscale_<version>_amd64.tgz.sha256`. On ARM64 runners, use `arm64` in place of `amd64`. Update `sha256` whenever you change `version`.
 
 ssh uses the settings in the SSH config only when the destination on the ssh command line is exactly the `host` input. With these settings, ssh accepts only an ed25519 host key with the given fingerprint, and does not read or write `known_hosts`.
+
+## opencode-review
+
+This action holds the files for the OpenCode code review: the `pr-review` agent in `agents/`, the review prompt in `prompt.md`, and the `exhaustive-review` skill in `skills/`. The `path` output of the action is the directory that holds these files. The review workflow, `.github/workflows/opencode-review.yml`, copies the files from that directory. Before the model starts, the workflow also reads the project's guide from the base branch of the caller's repository, and writes it to `.opencode/guide.md` in the checkout. The only step of the action checks that the agent file is not empty.
+
+The files are in an action because a job in another private repository cannot check out this repository with its `GITHUB_TOKEN`. The job can use an action from this repository, and the runner then downloads the directory of the action.
+
+The permission list in the front matter of the agent is the sandbox of the model. OpenCode lets the model read and edit only the files that the list allows, and run only the commands that it allows. A trailing `*` in a shell rule matches extra arguments. The model can add an argument such as `-X POST` to an allowed `gh api` command to make it write. GitHub rejects that write because the token of the review job is read-only. Keep that token read-only, and examine it again when you change the list.
+
+`skills/exhaustive-review/` is a copy of `skills/exhaustive-review` in the agent-config repository. The exception is `references/ci-opencode.md`, which is a copy of the file in the gingerbread repository. `skills/opencode-tools.md` is a copy of the file with the same name in agent-config, because `SKILL.md` links to it. When you change one of these files in its source repository, copy the changed file here.
