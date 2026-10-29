@@ -70,6 +70,8 @@ OpenCode reads the model's permissions, skills and instructions from `.opencode`
 
 After the run, the `review` job puts back the pull request's versions of these files, and then examines the working tree. If the model changed a file, the `review` job fails.
 
+OpenCode also loads skills from `.claude/skills` and `.agents/skills`, and reads instructions from `CLAUDE.md`. The `review` job does not replace these files, because they are part of the changes under review. Instead, the step that runs OpenCode sets two environment variables. When `OPENCODE_DISABLE_EXTERNAL_SKILLS` is `1`, OpenCode does not load skills from `.claude` or `.agents`. When `OPENCODE_DISABLE_CLAUDE_CODE` is `1`, OpenCode does not read `CLAUDE.md` or the skills in `.claude`.
+
 ### Change the review
 
 Callers run the review on `pull_request_target` events. For these events, GitHub runs the caller from the base branch of the pull request. When a pull request changes the review workflow or the `opencode-review` action, GitHub runs the previous version of the review on that pull request. In this repository, the caller refers to the workflow by a local path, and GitHub runs the changed version for the first time on the next pull request after the merge. In every other repository, the caller pins the workflow to a commit SHA. GitHub runs the changed version there only after you change that pin.

@@ -71,6 +71,20 @@ test("the key sits where OpenCode V2 reads a provider's API key", () => {
   assert.doesNotMatch(review, /\bprovider: \{/);
 });
 
+test("the key is written outside the checkout", () => {
+  assert.ok(
+    step("Write the OpenRouter key").includes('> "$RUNNER_TEMP/opencode-secrets/openrouter-key"'),
+    "the key file is not under $RUNNER_TEMP/opencode-secrets",
+  );
+  assert.ok(step("Review the pull request").includes('key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"'));
+});
+
+test("OpenCode skips the pull request's .claude, .agents and CLAUDE.md", () => {
+  const review = step("Review the pull request");
+  assert.match(review, /OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"/);
+  assert.match(review, /OPENCODE_DISABLE_CLAUDE_CODE: "1"/);
+});
+
 test("the key file is removed with the rest of OpenCode's state", () => {
   assert.match(step("Remove OpenCode and its state"), /"\$RUNNER_TEMP\/opencode-secrets"/);
 });
