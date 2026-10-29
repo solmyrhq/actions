@@ -84,7 +84,7 @@ jobs:
             - name: Get the review harness
               id: harness
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/opencode-review@a7acb56bc50c90d9d927345055ee94cee22805ad
+              uses: solmyrhq/actions/opencode-review@11a27f6597454731b1b495f4362700b058399ded
 
             # OpenCode runs the plugins in .opencode before it consults any
             # permission. No permission rule can stop a plugin that the pull
