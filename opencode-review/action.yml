@@ -1,0 +1,15 @@
+name: OpenCode review harness
+description: >-
+    The agent, prompt and skill that the OpenCode review in
+    .github/workflows/opencode-review.yml runs with.
+
+outputs:
+    path:
+        description: The directory that holds agents/, skills/ and prompt.md.
+        value: ${{ github.action_path }}
+
+runs:
+    using: composite
+    steps:
+        - shell: bash
+          run: test -s "$GITHUB_ACTION_PATH/agents/pr-review.md"
