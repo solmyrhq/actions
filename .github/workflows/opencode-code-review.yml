@@ -1,0 +1,24 @@
+name: OpenCode Code Review
+
+on:
+    pull_request_target:
+        types: [opened, synchronize, ready_for_review, reopened]
+    workflow_dispatch:
+        inputs:
+            pr:
+                description: Pull request number
+                required: true
+
+permissions: {}
+
+jobs:
+    review:
+        uses: ./.github/workflows/opencode-review.yml
+        permissions:
+            contents: write
+            pull-requests: write
+        with:
+            pr: ${{ inputs.pr }}
+            guide: README.md
+        secrets:
+            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
