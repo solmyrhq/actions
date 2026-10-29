@@ -64,6 +64,13 @@ test("the step that runs the model has no OpenRouter key in its environment", ()
   assert.ok(review.includes('"{file:$key_file}"'), "OpenCode does not read the key from the file");
 });
 
+test("the key sits where OpenCode V2 reads a provider's API key", () => {
+  // The V1 `provider.<id>.options` shape is deprecated in OpenCode's config schema.
+  const review = step("Review the pull request");
+  assert.match(review, /providers: \{openrouter: \{settings: \{apiKey: \$key\}\}\}/);
+  assert.doesNotMatch(review, /\bprovider: \{/);
+});
+
 test("the key file is removed with the rest of OpenCode's state", () => {
   assert.match(step("Remove OpenCode and its state"), /"\$RUNNER_TEMP\/opencode-secrets"/);
 });
