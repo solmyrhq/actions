@@ -32,7 +32,7 @@ jobs:
             (github.event_name == 'pull_request_target' &&
              github.event.pull_request.head.repo.full_name == github.repository &&
              !github.event.pull_request.draft)
-        runs-on: self-hosted
+        runs-on: [self-hosted, X64]
         timeout-minutes: 80
         permissions:
             contents: read
@@ -158,12 +158,26 @@ jobs:
                   }' > "$RUNNER_TEMP/threads-pages.json"
                   jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' "$RUNNER_TEMP/threads-pages.json" > review-output/threads.json
 
+            # The model may run `gh ... --jq <expression>`, and jq's `env`
+            # prints the process environment. If the key were in the
+            # environment of the step that runs OpenCode, the model could copy
+            # it into the review, and the publish job would post it.
+            - name: Write the OpenRouter key
+              id: key
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 1
+              env:
+                  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+              run: |
+                  umask 077
+                  mkdir -p "$RUNNER_TEMP/opencode-secrets"
+                  printf '%s' "$OPENROUTER_API_KEY" > "$RUNNER_TEMP/opencode-secrets/openrouter-key"
+
             - name: Review the pull request
               id: review
               if: steps.prepare.outputs.review == 'true'
               timeout-minutes: 50
               env:
-                  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
                   GH_TOKEN: ${{ github.token }}
                   PR_NUMBER: ${{ steps.prepare.outputs.pr_number }}
                   REPOSITORY: ${{ github.repository }}
@@ -178,9 +192,13 @@ jobs:
                   # .claude or .agents, where the pull request could add its
                   # own.
                   OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
+                  OPENCODE_DISABLE_CLAUDE_CODE: "1"
               run: |
                   mkdir -p "$HOME" "$XDG_CONFIG_HOME/opencode" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
-                  printf '%s\n' '{"$schema":"https://opencode.ai/config.json","update":"disable","snapshots":false}' > "$XDG_CONFIG_HOME/opencode/opencode.json"
+                  key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"
+                  jq -n --arg key "{file:$key_file}" \
+                      '{"$schema": "https://opencode.ai/config.json", update: "disable", snapshots: false, providers: {openrouter: {settings: {apiKey: $key}}}}' \
+                      > "$XDG_CONFIG_HOME/opencode/opencode.json"
                   prompt=$(printf '%s\n\nReview pull request #%s in %s at head commit %s.\n' "$(cat "$HARNESS/prompt.md")" "$PR_NUMBER" "$REPOSITORY" "$HEAD_SHA")
                   "$RUNNER_TEMP/opencode/opencode" run \
                       --standalone \
@@ -267,13 +285,13 @@ jobs:
               id: cleanup
               if: always()
               timeout-minutes: 1
-              run: rm -rf review-output "$RUNNER_TEMP/opencode" "$RUNNER_TEMP/opencode-home" "$RUNNER_TEMP/guide.md" "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/threads-pages.json"
+              run: rm -rf review-output "$RUNNER_TEMP/opencode" "$RUNNER_TEMP/opencode-home" "$RUNNER_TEMP/opencode-secrets" "$RUNNER_TEMP/guide.md" "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/threads-pages.json"
 
     publish:
         name: Post the OpenCode review
         needs: review
         if: needs.review.result == 'success' && needs.review.outputs.review == 'true'
-        runs-on: self-hosted
+        runs-on: [self-hosted, X64]
         timeout-minutes: 30
         permissions:
             contents: write # The resolveReviewThread mutation fails without it.

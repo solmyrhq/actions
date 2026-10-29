@@ -25,7 +25,7 @@ This action joins the tailnet as an ephemeral node for the rest of the job and w
 
 `sha256` is the checksum of the tarball for the runner's architecture. Tailscale publishes it at `https://pkgs.tailscale.com/stable/tailscale_<version>_amd64.tgz.sha256`. On ARM64 runners, use `arm64` in place of `amd64`. Update `sha256` whenever you change `version`.
 
-ssh uses the settings in the SSH config only when the destination on the ssh command line is exactly the `host` input. With these settings, ssh accepts only an ed25519 host key with the given fingerprint, and does not read or write `known_hosts`.
+ssh uses the settings in the SSH config only when the host name in the destination on the ssh command line is exactly the `host` input. If the destination also has a user name, as in `user@host`, ssh compares only the host name after the `@`. With these settings, ssh accepts only an ed25519 host key with the given fingerprint, and does not read or write `known_hosts`.
 
 ## OpenCode review workflow
 
@@ -58,7 +58,7 @@ jobs:
             OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
-For a `pull_request_target` event, GitHub runs the caller from the default branch. A pull request therefore cannot change the workflow that reviews it. The workflow does not review a draft pull request or a pull request from a fork. To review a pull request again, run the caller from the Actions tab and give the pull request number.
+For a `pull_request_target` event, GitHub runs the caller from the base branch of the pull request. A pull request therefore cannot change the workflow that reviews it. The workflow does not review a draft pull request or a pull request from a fork. To review a pull request again, run the caller from the Actions tab and give the pull request number.
 
 The `review` job runs the model with a read-only token. The model writes the review to files, and the `review` job uploads them. The `publish` job does not run a model. It posts the comments from these files and resolves the review threads that the model selected. Only the `publish` job can write to the pull request.
 
@@ -70,9 +70,23 @@ OpenCode reads the model's permissions, skills and instructions from `.opencode`
 
 After the run, the `review` job puts back the pull request's versions of these files, and then examines the working tree. If the model changed a file, the `review` job fails.
 
+OpenCode also loads skills from `.claude/skills` and `.agents/skills`, and reads instructions from `CLAUDE.md`. The `review` job does not replace these files, because they are part of the changes under review. Instead, the step that runs OpenCode sets two environment variables. When `OPENCODE_DISABLE_EXTERNAL_SKILLS` is `1`, OpenCode does not load skills from `.claude` or `.agents`. When `OPENCODE_DISABLE_CLAUDE_CODE` is `1`, OpenCode does not read `CLAUDE.md` or the skills in `.claude`.
+
+### Change the review
+
+Callers run the review on `pull_request_target` events. For these events, GitHub runs the caller from the base branch of the pull request. When a pull request changes the review workflow or the `opencode-review` action, GitHub runs the previous version of the review on that pull request. In this repository, the caller refers to the workflow by a local path, and GitHub runs the changed version for the first time on the next pull request after the merge. In every other repository, the caller pins the workflow to a commit SHA. GitHub runs the changed version there only after you change that pin.
+
+In `.github/workflows/opencode-review.yml`, the `opencode-review` action is pinned to a full commit SHA. Pull requests in this repository can be merged only as squash commits, and GitHub deletes the branch of a pull request when the pull request is merged. Thus, to change the action, you must use two pull requests in this repository, and then one pull request in each repository that calls the workflow:
+
+1. Merge a pull request that changes the action.
+2. In `.github/workflows/opencode-review.yml`, change the pin to the squash commit of step 1 on the main branch. Merge a second pull request with this change.
+3. In each repository that calls the workflow, change the pin in `.github/workflows/opencode-code-review.yml` to the squash commit of step 2 on the main branch. Merge a pull request with this change.
+
+Do not pin the action to a commit on the branch of a pull request. After the squash merge, GitHub deletes the branch, and the commit is then on no branch. GitHub can delete a commit that is on no branch, and then the runner cannot download the action at the pinned commit.
+
 ## opencode-review
 
-This action holds the files for the OpenCode code review: the `pr-review` agent in `agents/`, the review prompt in `prompt.md`, and the `exhaustive-review` skill in `skills/`. The `path` output of the action is the directory that holds these files. The review workflow, `.github/workflows/opencode-review.yml`, copies the files from that directory. Before the model starts, the workflow also reads the project's guide from the base branch of the caller's repository, and writes it to `.opencode/guide.md` in the checkout. The only step of the action checks that the agent file is not empty.
+This action holds the files for the OpenCode code review: the `pr-review` agent in `agents/`, the review prompt in `prompt.md`, and the `exhaustive-review` skill in `skills/`. The `path` output of the action is the directory that holds these files. The review workflow, `.github/workflows/opencode-review.yml`, copies the files from that directory. Before the model starts, the workflow also reads the project's guide from the base branch of the caller's repository, and writes it to `.opencode/guide.md` in the checkout. The action has one step. This step checks that `agents/pr-review.md`, `prompt.md` and `skills/exhaustive-review/SKILL.md` are not empty.
 
 The files are in an action because a job in another private repository cannot check out this repository with its `GITHUB_TOKEN`. The job can use an action from this repository, and the runner then downloads the directory of the action.
 

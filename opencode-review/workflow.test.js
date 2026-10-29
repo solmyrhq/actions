@@ -42,10 +42,53 @@ test("only the job that runs no model can write", () => {
   assert.doesNotMatch(job("publish"), /opencode" run|OPENROUTER_API_KEY/);
 });
 
-test("the OpenRouter key reaches only the step that runs the model", () => {
+// Returns the text of one step of the review job, from its `- name:` line up to the next step's.
+function step(name) {
+  const text = job("review");
+  const start = text.indexOf(`- name: ${name}\n`);
+  assert.notEqual(start, -1, `no step named ${name}`);
+  const next = text.indexOf("\n            - name: ", start + 1);
+  return next === -1 ? text.slice(start) : text.slice(start, next);
+}
+
+test("the OpenRouter key reaches only the step that writes it to a file", () => {
   const uses = TEXT.match(/secrets\.OPENROUTER_API_KEY/g) ?? [];
   assert.equal(uses.length, 1);
-  assert.match(job("review"), /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}\n[\s\S]*?opencode" run/);
+  assert.match(step("Write the OpenRouter key"), /secrets\.OPENROUTER_API_KEY/);
+});
+
+test("the step that runs the model has no OpenRouter key in its environment", () => {
+  const review = step("Review the pull request");
+  assert.match(review, /opencode" run/);
+  assert.doesNotMatch(review, /OPENROUTER_API_KEY/);
+  assert.ok(review.includes('"{file:$key_file}"'), "OpenCode does not read the key from the file");
+});
+
+test("the key sits where OpenCode V2 reads a provider's API key", () => {
+  // The V1 `provider.<id>.options` shape is deprecated in OpenCode's config schema.
+  const review = step("Review the pull request");
+  assert.match(review, /providers: \{openrouter: \{settings: \{apiKey: \$key\}\}\}/);
+  assert.doesNotMatch(review, /\bprovider: \{/);
+});
+
+test("the key is written outside the checkout", () => {
+  assert.ok(
+    step("Write the OpenRouter key").includes('> "$RUNNER_TEMP/opencode-secrets/openrouter-key"'),
+    "the key file is not under $RUNNER_TEMP/opencode-secrets",
+  );
+  assert.ok(step("Review the pull request").includes('key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"'));
+});
+
+test("OpenCode skips the pull request's .claude, .agents and CLAUDE.md", () => {
+  const review = step("Review the pull request");
+  assert.match(review, /OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"/);
+  assert.match(review, /OPENCODE_DISABLE_CLAUDE_CODE: "1"/);
+});
+
+test("the key file is removed with the rest of OpenCode's state, even after a failure", () => {
+  const cleanup = step("Remove OpenCode and its state");
+  assert.match(cleanup, /\n {14}if: always\(\)\n/);
+  assert.match(cleanup, /"\$RUNNER_TEMP\/opencode-secrets"/);
 });
 
 test("a pull request from a fork or a draft is not reviewed", () => {
