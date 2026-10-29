@@ -82,7 +82,10 @@ test("the prompt tells the model to load the skill", () => {
   assert.match(prompt, /`exhaustive-review` skill/);
 });
 
-test("the action outputs its own directory", () => {
+test("the action outputs its own directory from a step", () => {
   const action = fs.readFileSync(path.join(HERE, "action.yml"), "utf8");
-  assert.match(action, /value: \$\{\{ github\.action_path \}\}/);
+  assert.doesNotMatch(action, /value: \$\{\{ github\.action_path \}\}/);
+  assert.match(action, /value: \$\{\{ steps\.locate\.outputs\.path \}\}/);
+  assert.match(action, /- id: locate\n/);
+  assert.ok(action.includes('echo "path=$GITHUB_ACTION_PATH" >> "$GITHUB_OUTPUT"'));
 });

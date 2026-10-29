@@ -6,10 +6,17 @@ description: >-
 outputs:
     path:
         description: The directory that holds agents/, skills/ and prompt.md.
-        value: ${{ github.action_path }}
+        value: ${{ steps.locate.outputs.path }}
 
 runs:
     using: composite
     steps:
-        - shell: bash
-          run: test -s "$GITHUB_ACTION_PATH/agents/pr-review.md"
+        # When an output's value is `${{ github.action_path }}`, callers
+        # receive an empty string.
+        - id: locate
+          shell: bash
+          run: |
+              test -s "$GITHUB_ACTION_PATH/agents/pr-review.md"
+              test -s "$GITHUB_ACTION_PATH/prompt.md"
+              test -s "$GITHUB_ACTION_PATH/skills/exhaustive-review/SKILL.md"
+              echo "path=$GITHUB_ACTION_PATH" >> "$GITHUB_OUTPUT"
