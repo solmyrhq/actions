@@ -70,6 +70,17 @@ OpenCode reads the model's permissions, skills and instructions from `.opencode`
 
 After the run, the `review` job puts back the pull request's versions of these files, and then examines the working tree. If the model changed a file, the `review` job fails.
 
+### Change the review
+
+Callers run the review on `pull_request_target` events. For these events, GitHub runs the caller from the default branch. When a pull request changes the review workflow or the `opencode-review` action, GitHub runs the previous version of the review on that pull request. GitHub runs the changed version for the first time on the next pull request after the merge.
+
+In `.github/workflows/opencode-review.yml`, the `opencode-review` action is pinned to a full commit SHA. Pull requests in this repository can be merged only as squash commits, and GitHub deletes the branch of a pull request when the pull request is merged. Thus you must use two pull requests to change the action:
+
+1. Merge a pull request that changes the action.
+2. In `.github/workflows/opencode-review.yml`, change the pin to the squash commit of step 1 on the main branch. Merge a second pull request with this change.
+
+Do not pin the action to a commit on the branch of a pull request. After the squash merge, GitHub deletes the branch, and the commit is then on no branch. GitHub can delete a commit that is on no branch, and then the runner cannot download the action at the pinned commit.
+
 ## opencode-review
 
 This action holds the files for the OpenCode code review: the `pr-review` agent in `agents/`, the review prompt in `prompt.md`, and the `exhaustive-review` skill in `skills/`. The `path` output of the action is the directory that holds these files. The review workflow, `.github/workflows/opencode-review.yml`, copies the files from that directory. Before the model starts, the workflow also reads the project's guide from the base branch of the caller's repository, and writes it to `.opencode/guide.md` in the checkout. The only step of the action checks that the agent file is not empty.
