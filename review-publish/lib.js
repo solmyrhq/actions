@@ -118,7 +118,6 @@ async function publish({ github, repository, pr, markerName, headSha, directory,
   // When only the publish job is re-run, the marker is the same, and an earlier
   // attempt may already have posted some of these comments.
   const ours = (posted) => posted.user?.login === BOT.rest && (posted.body ?? "").startsWith(marker);
-  // Two findings can have the same text on different lines.
   const place = (comment) => JSON.stringify([comment.path, comment.line, comment.side, comment.body]);
   const inline = new Set((await github.paginate(`/repos/${repository}/pulls/${pr}/comments`)).filter(ours).map(place));
   const summaryPosted = (await github.paginate(`/repos/${repository}/issues/${pr}/comments`)).some(ours);
