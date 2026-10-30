@@ -1,7 +1,7 @@
 "use strict";
 
-// The Claude review has no harness action of its own: it loads the skill from
-// this directory, so its workflow's tests are here.
+// The Claude review has no harness action. This directory holds only the tests
+// of .github/workflows/claude-review.yml.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { workflow } = require("../test-support/workflow.js");
 
-const { text: TEXT, step, permissions, condition } = workflow("opencode-review.yml");
+const { text: TEXT, job, step, permissions, condition } = workflow("opencode-review.yml");
 const review = (name) => step("review", name);
 
 test("the workflow grants no permission at the top level", () => {
@@ -96,6 +96,13 @@ test("the skills come from the skills action, with the tool mappings that SKILL.
 
 test("the guide is read from the base commit, not from the pull request", () => {
   assert.match(TEXT, /contents\/\$GUIDE\?ref=\$BASE_SHA/);
+});
+
+test("the publish job downloads the artifact by the name the review job uploaded, so a re-run of only the publish job finds it", () => {
+  assert.match(job("review"), /\n {12}artifact: \$\{\{ steps\.prepare\.outputs\.artifact \}\}\n/);
+  assert.match(review("Upload the review"), /name: \$\{\{ steps\.prepare\.outputs\.artifact \}\}\n/);
+  assert.match(step("publish", "Download the review"), /name: \$\{\{ needs\.review\.outputs\.artifact \}\}\n/);
+  assert.doesNotMatch(job("publish"), /run_attempt/);
 });
 
 test("the review is checked and posted by the shared actions under the OpenCode marker", () => {

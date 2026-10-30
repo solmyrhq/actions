@@ -62,9 +62,9 @@ test("only the Codex process is given the tailnet proxy", () => {
   assert.match(review("Join the tailnet"), /tags: tag:ci-code-review\n/);
 });
 
-test("the pull request's agent files are moved aside for the run and restored after it", () => {
+test("the pull request's agent files are removed for the run and restored from the head commit after it", () => {
   const paths = ".agents .codex AGENTS.md AGENTS.override.md";
-  assert.ok(review("Move the pull request's agent files aside").includes(`for path in ${paths}; do`));
+  assert.ok(review("Remove the pull request's agent files for the run").includes(`for path in ${paths}; do`));
   assert.ok(review("Restore the pull request's agent files").includes(`for path in ${paths}; do`));
 });
 
@@ -98,6 +98,13 @@ test("the key check and the tree check run before the review is checked and uplo
   const order = ["Check that the review changed nothing", "Check that the review holds no key", "Check the review", "Upload the review"];
   const positions = order.map((name) => TEXT.indexOf(`- name: ${name}\n`));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+});
+
+test("the publish job downloads the artifact by the name the review job uploaded, so a re-run of only the publish job finds it", () => {
+  assert.match(job("review"), /\n {12}artifact: \$\{\{ steps\.prepare\.outputs\.artifact \}\}\n/);
+  assert.match(review("Upload the review"), /name: \$\{\{ steps\.prepare\.outputs\.artifact \}\}\n/);
+  assert.match(step("publish", "Download the review"), /name: \$\{\{ needs\.review\.outputs\.artifact \}\}\n/);
+  assert.doesNotMatch(job("publish"), /run_attempt/);
 });
 
 test("Codex's files are removed even after a failure", () => {

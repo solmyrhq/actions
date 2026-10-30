@@ -28,11 +28,12 @@ concurrency:
 jobs:
     review:
         name: Claude review
-        # CODE_REVIEWS is an organization variable, which a repository variable
-        # of the same name overrides. It lists the reviews to run, separated by
-        # commas with no spaces, such as `claude,codex`.
+        # CODE_REVIEWS is an organization variable, and can be overridden by a
+        # repository variable of the same name. Its value is the list of reviews
+        # to run, separated by commas with no spaces, such as `claude,codex`.
         #
-        # GitHub withholds secrets from a pull request opened from a fork.
+        # A pull request from a fork is not reviewed: under pull_request_target
+        # its job would run with this repository's secrets.
         # author_association is not checked: GitHub has reported the same
         # organization member as CONTRIBUTOR in one repository and MEMBER in
         # another.
@@ -43,17 +44,16 @@ jobs:
             !github.event.pull_request.draft
         runs-on: [self-hosted, X64]
         timeout-minutes: 90
-        # claude-code-action posts the review with its Claude GitHub App token,
-        # which it gets through an OIDC exchange, so the job asks for no
-        # pull-requests or issues permission.
+        # claude-code-action exchanges an OIDC token for a Claude GitHub App
+        # token, and posts the review with the app token, not GITHUB_TOKEN.
         permissions:
             contents: read
             id-token: write
             actions: read # claude-code-action skips its github_ci MCP server without this.
         steps:
             # Before Claude starts, claude-code-action restores .claude/,
-            # CLAUDE.md and its other configuration paths from the base
-            # branch, so the pull request cannot change Claude's settings.
+            # CLAUDE.md and Claude Code's other configuration paths from the
+            # base branch, and removes those that the base branch lacks.
             - name: Check out the pull request
               id: checkout
               timeout-minutes: 2
@@ -67,10 +67,9 @@ jobs:
 
             - name: Get the review skills
               id: skills
-              uses: solmyrhq/actions/skills@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              uses: solmyrhq/actions/skills@979ffa1c5c4818caf082fb0c2b13b689928df8e8
 
-            # claude-code-action replaces the checkout's .claude/ with the base
-            # branch's, so the skill goes into Claude's user configuration.
+            # claude-code-action would remove a skill in the checkout's .claude/.
             - name: Set up Claude's configuration
               id: config
               timeout-minutes: 1
@@ -88,10 +87,9 @@ jobs:
               uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
               env:
                   CLAUDE_CONFIG_DIR: ${{ steps.config.outputs.path }}
-                  # Under this action, Claude Code ends the run when the model
-                  # returns its final result, even if subagents started in the
-                  # background are still working, so their findings are never
-                  # posted.
+                  # Under claude-code-action, Claude Code ends the run when the
+                  # model returns its final result, even while background
+                  # subagents are still working.
                   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

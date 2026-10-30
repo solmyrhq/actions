@@ -1,8 +1,9 @@
 "use strict";
 
-// Reads a workflow's jobs and steps as text, so that a test's assertions can
-// match one job or one step. The runners have no YAML parser to install, and
-// the workflows keep a fixed four-space indentation that these helpers rely on.
+// Reads a workflow's jobs and steps as text, for assertions that match one job
+// or one step. The tests run on plain Node with no packages, and have no YAML
+// parser. These helpers find jobs and steps by the workflows' four-space
+// indentation.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

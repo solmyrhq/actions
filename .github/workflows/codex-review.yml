@@ -45,9 +45,9 @@ concurrency:
 jobs:
     review:
         name: Codex review
-        # CODE_REVIEWS is an organization variable, which a repository variable
-        # of the same name overrides. It lists the reviews to run, separated by
-        # commas with no spaces, such as `claude,codex`.
+        # CODE_REVIEWS is an organization variable, and can be overridden by a
+        # repository variable of the same name. Its value is the list of reviews
+        # to run, separated by commas with no spaces, such as `claude,codex`.
         if: >-
             contains(format(',{0},', vars.CODE_REVIEWS), ',codex,') && (
             github.event_name == 'workflow_dispatch' ||
@@ -63,6 +63,9 @@ jobs:
             review: ${{ steps.prepare.outputs.review }}
             pr_number: ${{ steps.prepare.outputs.pr_number }}
             head_sha: ${{ steps.prepare.outputs.head_sha }}
+            # A re-run of only the publish job has a higher run_attempt than
+            # the attempt that uploaded the artifact.
+            artifact: ${{ steps.prepare.outputs.artifact }}
         steps:
             - name: Check the pull request
               id: prepare
@@ -91,6 +94,7 @@ jobs:
                       echo "pr_number=$PR_NUMBER"
                       echo "head_sha=$(jq -r '.headRefOid' "$pr_json")"
                       echo "base_sha=$(jq -r '.baseRefOid' "$pr_json")"
+                      echo "artifact=codex-review-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
                   } >> "$GITHUB_OUTPUT"
 
             - name: Check out the pull request
@@ -106,15 +110,14 @@ jobs:
             - name: Get the review harness
               id: harness
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/codex-review@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              uses: solmyrhq/actions/codex-review@979ffa1c5c4818caf082fb0c2b13b689928df8e8
 
             - name: Get the review skills
               id: skills
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/skills@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              uses: solmyrhq/actions/skills@979ffa1c5c4818caf082fb0c2b13b689928df8e8
 
-            # The model has no network and no GitHub token, so the workflow
-            # reads everything that the review needs before Codex starts.
+            # The model has no network and no GitHub token.
             - name: Read the pull request
               id: context
               if: steps.prepare.outputs.review == 'true'
@@ -135,8 +138,7 @@ jobs:
                   fi
                   gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,title,body,baseRefName,baseRefOid,headRefName,headRefOid > "$context/pull-request.json"
                   gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" > "$context/diff.patch"
-                  # gh refuses --slurp together with --jq. --slurp writes one
-                  # array of pages, which `add` joins into one list.
+                  # gh exits with an error when --slurp and --jq are both given.
                   list() {
                       gh api "$1" --paginate --slurp > "$RUNNER_TEMP/codex-review/pages.json"
                       jq 'add // []' "$RUNNER_TEMP/codex-review/pages.json" > "$2"
@@ -145,7 +147,7 @@ jobs:
                   list "repos/$REPOSITORY/pulls/$PR_NUMBER/comments" "$context/review-comments.json"
                   list "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" "$context/reviews.json"
                   list "repos/$REPOSITORY/issues/$PR_NUMBER/comments" "$context/issue-comments.json"
-                  # shellcheck disable=SC2016 # The $variables are GraphQL's, not the shell's.
+                  # shellcheck disable=SC2016 # The $variables are GraphQL variables.
                   gh api graphql --paginate --slurp \
                       -f owner="${REPOSITORY%/*}" \
                       -f repo="${REPOSITORY#*/}" \
@@ -168,9 +170,8 @@ jobs:
                   rm "$RUNNER_TEMP/codex-review/pages.json"
                   echo "path=$context" >> "$GITHUB_OUTPUT"
 
-            # The package holds the bubblewrap and ripgrep builds that Codex
-            # runs. Bump the version and the hash together; the hash is the
-            # release asset's digest on GitHub.
+            # The package includes the bubblewrap and ripgrep builds that Codex
+            # runs. sha256 is the digest that GitHub shows for the release asset.
             - name: Install Codex
               id: install
               if: steps.prepare.outputs.review == 'true'
@@ -188,9 +189,8 @@ jobs:
                   rm "$dir/codex.tgz"
                   echo "codex=$dir/bin/codex" >> "$GITHUB_OUTPUT"
 
-            # Codex runs each command that the model asks for in bubblewrap,
-            # which needs unprivileged user namespaces. Fail here, before the
-            # model starts, if the runner does not allow them.
+            # Codex runs the model's commands in bubblewrap, which needs
+            # unprivileged user namespaces on the runner.
             - name: Check the Codex sandbox
               id: sandbox
               if: steps.prepare.outputs.review == 'true'
@@ -218,10 +218,8 @@ jobs:
                   cp "$SKILLS/codex-tools.md" "$home/.agents/skills/codex-tools.md"
 
             # Codex loads skills from the repository's .agents/skills, where a
-            # pull request could add its own copy of exhaustive-review. Codex
-            # ignores the repository's .codex and AGENTS.md through
-            # config.toml, and they are moved out of the way too.
-            - name: Move the pull request's agent files aside
+            # pull request could add its own copy of exhaustive-review.
+            - name: Remove the pull request's agent files for the run
               id: hide
               if: steps.prepare.outputs.review == 'true'
               timeout-minutes: 1
@@ -234,12 +232,10 @@ jobs:
               id: tailnet
               if: steps.prepare.outputs.review == 'true'
               timeout-minutes: 3
-              uses: solmyrhq/actions/tailnet-http@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              uses: solmyrhq/actions/tailnet-http@979ffa1c5c4818caf082fb0c2b13b689928df8e8
               with:
                   oauth-secret: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
                   tags: tag:ci-code-review
-                  # Tailscale drops support for old clients. Bump sha256 with
-                  # the version.
                   version: 1.98.9
                   sha256: 11be30ad301d48f84ff52fec34f8a2f78eb3e3dee1be4e9624d19fccc8df5540
 
@@ -259,8 +255,8 @@ jobs:
                   EFFORT: ${{ inputs.effort }}
                   HOME: ${{ runner.temp }}/codex-review/home
                   CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
-                  # Only the Codex process uses the proxy. config.toml keeps
-                  # it, and the key, out of the commands that the model runs.
+                  # Under the shell_environment_policy in config.toml, Codex
+                  # passes neither the proxy nor the key to the model's commands.
                   HTTPS_PROXY: ${{ steps.tailnet.outputs.http-proxy }}
                   CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
               run: |
@@ -303,7 +299,8 @@ jobs:
                   fi
 
             # The model can read the key from the Codex process. With no
-            # network, the only way out is the review itself.
+            # network, the model can send the key out only in the review. This
+            # check finds only an exact copy of the key.
             - name: Check that the review holds no key
               id: leak
               if: steps.prepare.outputs.review == 'true'
@@ -319,7 +316,7 @@ jobs:
             - name: Check the review
               id: check
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/review-check@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              uses: solmyrhq/actions/review-check@979ffa1c5c4818caf082fb0c2b13b689928df8e8
               with:
                   directory: ${{ runner.temp }}/codex-review/output
                   marker: codex-code-review
@@ -332,7 +329,7 @@ jobs:
               timeout-minutes: 2
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
-                  name: codex-review-${{ github.run_id }}-${{ github.run_attempt }}
+                  name: ${{ steps.prepare.outputs.artifact }}
                   path: ${{ runner.temp }}/codex-review/output
                   if-no-files-found: error
                   retention-days: 1
@@ -358,13 +355,13 @@ jobs:
               timeout-minutes: 2
               uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
               with:
-                  name: codex-review-${{ github.run_id }}-${{ github.run_attempt }}
+                  name: ${{ needs.review.outputs.artifact }}
                   path: ${{ runner.temp }}/codex-review-output
 
             - name: Post the review
               id: publish
               timeout-minutes: 25
-              uses: solmyrhq/actions/review-publish@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              uses: solmyrhq/actions/review-publish@979ffa1c5c4818caf082fb0c2b13b689928df8e8
               with:
                   token: ${{ github.token }}
                   directory: ${{ runner.temp }}/codex-review-output

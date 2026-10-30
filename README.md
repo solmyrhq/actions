@@ -48,9 +48,17 @@ This action joins the tailnet in the same way as `tailnet-ssh`. For the rest of 
 
 The proxy resolves MagicDNS names. It carries HTTP, and HTTPS in a `CONNECT` tunnel. It does not carry other protocols. The hosts and ports that a node with these tags can connect to are set in the tailnet policy.
 
-## OpenCode review workflow
+## Review workflows
 
-The `.github/workflows/opencode-review.yml` workflow runs OpenCode to review a pull request, and posts the review as inline comments and one summary comment. Each repository calls this workflow from its own `.github/workflows/opencode-code-review.yml`. In the example, replace `<commit sha>` with the SHA of a commit on the main branch of this repository. Set `guide` to the path of the file that holds the instructions for agents in your repository.
+Three reusable workflows review a pull request with the `exhaustive-review` skill: `.github/workflows/claude-review.yml`, `.github/workflows/codex-review.yml` and `.github/workflows/opencode-review.yml`. A repository calls each workflow from a caller workflow of its own. Each caller runs on `pull_request_target`. For this event, GitHub runs the caller from the base branch of the pull request. A pull request therefore cannot change the workflow that reviews it. No workflow reviews a draft pull request or a pull request from a fork. Under `pull_request_target`, the job for a pull request from a fork would get the secrets of the repository.
+
+### Turn a review on or off
+
+`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. A repository variable with the same name replaces the organization's value for that repository. If the name of a workflow is not in the list, the workflow skips the review job and posts nothing.
+
+### OpenCode
+
+The OpenCode workflow runs OpenCode to review a pull request, and posts the review as inline comments and one summary comment. Each repository calls this workflow from its own `.github/workflows/opencode-code-review.yml`. In the example, replace `<commit sha>` with the SHA of a commit on the main branch of this repository. Set `guide` to the path of the file that holds the instructions for agents in your repository.
 
 ```yaml
 name: OpenCode Code Review
@@ -79,13 +87,13 @@ jobs:
             OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
-For a `pull_request_target` event, GitHub runs the caller from the base branch of the pull request. A pull request therefore cannot change the workflow that reviews it. The workflow does not review a draft pull request or a pull request from a fork. To review a pull request again, run the caller from the Actions tab and give the pull request number.
+To review a pull request again, run the caller from the Actions tab and give the pull request number.
 
-The `review` job runs the model with a read-only token. The model writes the review to files, and the `review` job uploads them. The `publish` job does not run a model. It posts the comments from these files and resolves the review threads that the model selected. Only the `publish` job can write to the pull request.
+The `review` job runs the model with a read-only token. The model writes the review to files. The `review-check` action checks the files, and the `review` job uploads them. The `publish` job does not run a model. It posts the files with the `review-publish` action, which also resolves the review threads that the model selected. Only the `publish` job can write to the pull request.
 
 OpenCode reads the model's permissions, skills and instructions from `.opencode`, `opencode.json`, `opencode.jsonc` and `AGENTS.md`. OpenCode also runs the plugins in `.opencode` before it examines a permission. For these reasons, before OpenCode starts, the `review` job replaces these files in the pull request with:
 
-- the `pr-review` agent and the skills from the `opencode-review` action
+- the `pr-review` agent from the `opencode-review` action, and the skills from the `skills` action
 - the guide from the base commit of the pull request
 - an `opencode.json` that loads the guide
 
@@ -93,15 +101,87 @@ After the run, the `review` job puts back the pull request's versions of these f
 
 OpenCode also loads skills from `.claude/skills` and `.agents/skills`, and reads instructions from `CLAUDE.md`. The `review` job does not replace these files, because they are part of the changes under review. Instead, the step that runs OpenCode sets two environment variables. When `OPENCODE_DISABLE_EXTERNAL_SKILLS` is `1`, OpenCode does not load skills from `.claude` or `.agents`. When `OPENCODE_DISABLE_CLAUDE_CODE` is `1`, OpenCode does not read `CLAUDE.md` or the skills in `.claude`.
 
-### Change the review
+### Codex
 
-Callers run the review on `pull_request_target` events. For these events, GitHub runs the caller from the base branch of the pull request. When a pull request changes the review workflow or the `opencode-review` action, GitHub runs the previous version of the review on that pull request. In this repository, the caller refers to the workflow by a local path, and GitHub runs the changed version for the first time on the next pull request after the merge. In every other repository, the caller pins the workflow to a commit SHA. GitHub runs the changed version there only after you change that pin.
+The Codex workflow runs Codex with the `codex-review` harness, and posts the review in the same way as the OpenCode workflow, with the `codex-code-review` marker. Each repository calls it from its own `.github/workflows/codex-code-review.yml`:
 
-In `.github/workflows/opencode-review.yml`, each action from this repository is pinned to a full commit SHA. Pull requests in this repository can be merged only as squash commits, and GitHub deletes the branch of a pull request when the pull request is merged. Thus, to change an action that the workflow uses, you must use two pull requests in this repository, and then one pull request in each repository that calls the workflow:
+```yaml
+name: Codex Code Review
+
+on:
+    pull_request_target:
+        types: [opened, synchronize, ready_for_review, reopened]
+    workflow_dispatch:
+        inputs:
+            pr:
+                description: Pull request number
+                required: true
+
+permissions: {}
+
+jobs:
+    review:
+        uses: solmyrhq/actions/.github/workflows/codex-review.yml@<commit sha>
+        permissions:
+            contents: write
+            pull-requests: write
+        with:
+            pr: ${{ inputs.pr }}
+            guide: CLAUDE.md
+        secrets:
+            CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+            CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
+```
+
+Use the `model`, `effort` and `base-url` inputs to set the model, its reasoning effort and the CLIProxyAPI endpoint. The defaults are `gpt-6.1-sol`, `xhigh` and the CLIProxyAPI endpoint on linux-bruno.
+
+The model has no network and no GitHub token. Before Codex starts, the `review` job does these steps:
+
+1. It reads the pull request, its diff, its files, its comments, its reviews and its review threads, and the guide from the base commit, into a directory outside the checkout.
+2. It installs Codex from a release whose checksum is pinned, and checks that the Codex sandbox works on the runner.
+3. It puts `config.toml` from the `codex-review` action in a temporary `CODEX_HOME`, and the skills in the `.agents/skills` directory of a temporary `HOME`.
+4. It removes the pull request's `.agents`, `.codex`, `AGENTS.md` and `AGENTS.override.md` from the checkout. Codex loads skills from `.agents/skills`, where a pull request could add its own copy of `exhaustive-review`.
+5. It joins the tailnet with `tailnet-http`, as a node with the tag `tag:ci-code-review`. The job gives the proxy only to the Codex process.
+
+Codex runs with `--strict-config`. With this option, Codex stops with an error if a key in `config.toml` is not a Codex setting. The model returns the review as its final message, in the format of `output-schema.json`. After the run, the `review` job restores the removed files from the head commit. The job fails if the model changed the working tree. The model can read the CLIProxyAPI key (see the `codex-review` section). The job fails if the review contains an exact copy of the key. The job does not find an encoded copy of the key.
+
+### Claude
+
+The Claude workflow runs `anthropics/claude-code-action`, which posts the review with the Claude GitHub App's token. Each repository calls it from its own `.github/workflows/claude-code-review.yml`:
+
+```yaml
+name: Claude Code Review
+
+on:
+    pull_request_target:
+        types: [opened, synchronize, ready_for_review, reopened]
+
+permissions: {}
+
+jobs:
+    review:
+        uses: solmyrhq/actions/.github/workflows/claude-review.yml@<commit sha>
+        permissions:
+            contents: read
+            id-token: write
+            actions: read
+        secrets:
+            CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+Before Claude starts, `claude-code-action` puts back `.claude/`, `CLAUDE.md` and the other configuration paths of Claude Code from the base branch. It removes each of these paths that the base branch does not have. The skill therefore cannot be in the checkout. The workflow copies the skill from the `skills` action into a temporary `CLAUDE_CONFIG_DIR`. Claude Code loads user skills from this directory.
+
+The Claude workflow has no manual trigger (`workflow_dispatch`). Without a pull request in the event, `claude-code-action` has no pull request to comment on.
+
+### Change a review
+
+When a pull request changes a review workflow, or an action that a review workflow uses, GitHub runs the previous version of the review on that pull request, because the caller runs from the base branch. In this repository, each caller refers to its workflow by a local path, and GitHub runs the changed version for the first time on the next pull request after the merge. In every other repository, the caller pins the workflow to a commit SHA. GitHub runs the changed version there only after you change that pin.
+
+In each review workflow, each action from this repository is pinned to a full commit SHA. Pull requests in this repository can be merged only as squash commits, and GitHub deletes the branch of a pull request when the pull request is merged. Thus, to change an action that a workflow uses, you must use two pull requests in this repository, and then one pull request in each repository that calls the workflow:
 
 1. Merge a pull request that changes the action.
-2. In `.github/workflows/opencode-review.yml`, change the pin to the squash commit of step 1 on the main branch. Merge a second pull request with this change.
-3. In each repository that calls the workflow, change the pin in `.github/workflows/opencode-code-review.yml` to the squash commit of step 2 on the main branch. Merge a pull request with this change.
+2. In each workflow that uses the action, change the pin to the squash commit of step 1 on the main branch. Merge a second pull request with this change.
+3. In each repository that calls a changed workflow, change the pin in the caller of that workflow to the squash commit of step 2 on the main branch. Merge a pull request with this change.
 
 Do not pin the action to a commit on the branch of a pull request. After the squash merge, GitHub deletes the branch, and the commit is then on no branch. GitHub can delete a commit that is on no branch, and then the runner cannot download the action at the pinned commit.
 
