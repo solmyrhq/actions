@@ -1,0 +1,35 @@
+name: Tailnet HTTP proxy
+description: >-
+  Joins the tailnet as an ephemeral node for the rest of the job, without root,
+  and serves an HTTP proxy into it on a loopback port. Leaves the tailnet when
+  the job ends.
+
+inputs:
+  oauth-secret:
+    description: >-
+      Secret of a Tailscale OAuth client that can create auth keys for the tags
+      in `tags`.
+    required: true
+  tags:
+    description: Comma-separated tags for the node, such as `tag:ci-code-review`.
+    required: true
+  version:
+    description: Exact Tailscale release to run, such as `1.98.9`.
+    required: true
+  sha256:
+    description: >-
+      SHA-256 checksum of `tailscale_<version>_<arch>.tgz` from
+      pkgs.tailscale.com, as published in the `.sha256` file next to it.
+    required: true
+
+outputs:
+  http-proxy:
+    description: >-
+      URL of the proxy, such as `http://127.0.0.1:41234`. Set it as
+      `HTTPS_PROXY` for the one process that must reach the tailnet.
+
+runs:
+  using: node24
+  main: main.js
+  post: post.js
+  post-if: always()

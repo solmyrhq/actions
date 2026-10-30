@@ -1,0 +1,32 @@
+name: Publish a review
+description: >-
+  Posts a review that review-check passed: each inline comment, then the
+  summary. Resolves each nominated thread that this review opened on the pull
+  request, and checks that the summary was posted. Runs no model.
+
+inputs:
+  token:
+    description: >-
+      The workflow's GITHUB_TOKEN, with the `pull-requests: write` and
+      `contents: write` permissions. The resolveReviewThread mutation fails
+      without `contents: write`. Do not use a different token. The action finds
+      the comments and threads of the review by their author. That author is
+      `github-actions`, or `github-actions[bot]` in the REST API, only when the
+      token is GITHUB_TOKEN.
+    required: true
+  directory:
+    description: Directory that holds the checked summary.md, resolve.json and comment-*.json.
+    required: true
+  marker:
+    description: Name of the review's marker, such as `codex-code-review`.
+    required: true
+  pr:
+    description: Number of the pull request.
+    required: true
+  head-sha:
+    description: The pull request's head commit that the review covers.
+    required: true
+
+runs:
+  using: node24
+  main: main.js

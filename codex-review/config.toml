@@ -1,0 +1,53 @@
+# The workflow copies this file into a temporary CODEX_HOME and passes the
+# provider's base URL, the model and the reasoning effort with `-c`.
+
+model_provider = "cliproxy"
+approval_policy = "never"
+sandbox_mode = "read-only"
+web_search = "disabled"
+check_for_update_on_startup = false
+
+# Codex must not load AGENTS.md, because the pull request's copy is part of the
+# change under review. The workflow gives the model the base commit's guide.
+project_doc_max_bytes = 0
+
+[history]
+persistence = "none"
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+
+# App, connector, plugin, browser and image traffic does not pass through the
+# command sandbox. The runners are not ephemeral, and a Codex daemon must not
+# continue to run after the job.
+[features]
+apps = false
+plugins = false
+remote_plugin = false
+hooks = false
+memories = false
+browser_use = false
+computer_use = false
+image_generation = false
+daemon_auto_start = false
+
+# By default Codex passes every variable, including the proxy key, to the
+# commands that the model runs.
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+
+[model_providers.cliproxy]
+name = "CLIProxyAPI"
+# The commands that the model runs can still read this key from
+# /proc/1/environ, because PID 1 of the sandbox is a Codex helper that holds it.
+# The risk is accepted: the key works only from a tailnet node that has access
+# to CLIProxyAPI under the tailnet policy, and it can be revoked on its own.
+env_key = "CLIPROXY_API_KEY"
+wire_api = "responses"
+# Codex reaches the provider through the tailnet-http action's proxy, and it is
+# not known whether Codex's WebSocket client uses a proxy.
+supports_websockets = false

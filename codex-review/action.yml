@@ -1,0 +1,23 @@
+name: Codex review harness
+description: >-
+    The prompt, configuration and output schema that the Codex review in
+    .github/workflows/codex-review.yml runs with. The skills are in the skills
+    action.
+
+outputs:
+    path:
+        description: The directory that holds prompt.md, config.toml and output-schema.json.
+        value: ${{ steps.locate.outputs.path }}
+
+runs:
+    using: composite
+    steps:
+        # When an output's value is `${{ github.action_path }}`, callers
+        # receive an empty string.
+        - id: locate
+          shell: bash
+          run: |
+              test -s "$GITHUB_ACTION_PATH/prompt.md"
+              test -s "$GITHUB_ACTION_PATH/config.toml"
+              test -s "$GITHUB_ACTION_PATH/output-schema.json"
+              echo "path=$GITHUB_ACTION_PATH" >> "$GITHUB_OUTPUT"
