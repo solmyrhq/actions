@@ -302,9 +302,10 @@ jobs:
                       exit 1
                   fi
 
-            # The model can read the key from the Codex process. With no
-            # network, the model can send the key out only in the review. This
-            # check finds only an exact copy of the key.
+            # The model can read the key from the Codex process, and every file
+            # that the runner user can read. This step fails only on an exact
+            # copy of the key in the review. The other leaks are an accepted
+            # risk (see the `codex-review` section of README.md).
             - name: Check that the review holds no key
               id: leak
               if: steps.prepare.outputs.review == 'true'
