@@ -32,7 +32,7 @@ test("the review runs only when CODE_REVIEWS lists codex, and never on a fork or
 test("a manual run refuses a pull request given as anything but a number", () => {
   const prepare = review("Check the pull request");
   assert.ok(prepare.includes("'' | *[!0-9]*)"), "a URL or other text reaches gh pr view");
-  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf("gh pr view"), "the number is checked after gh pr view runs");
+  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf('gh pr view "$PR_NUMBER"'), "the number is checked after gh pr view runs");
 });
 
 test("the proxy key reaches only the step that runs Codex and the step that looks for it in the review", () => {
@@ -91,6 +91,15 @@ test("Codex is installed from a pinned release whose checksum is checked", () =>
   assert.match(install, /version=\d+\.\d+\.\d+\n/);
   assert.match(install, /sha256=[0-9a-f]{64}\n/);
   assert.match(install, /sha256sum --check --strict/);
+});
+
+test("a pull request whose diff GitHub refuses is still reviewed, from the patches in files.json", () => {
+  const read = review("Read the pull request");
+  assert.ok(read.includes('if ! gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" > "$context/diff.patch"; then'), "a refused diff ends the step");
+  assert.ok(read.indexOf("gh pr diff") > read.indexOf('"$context/threads.json"'), "a refused diff stops the files and threads being written");
+  const run = review("Review the pull request");
+  assert.ok(run.includes('if [ ! -e "$CONTEXT/diff.patch" ]; then'), "the prompt does not say that the diff is missing");
+  assert.match(run, /Read the patch of each file from files\.json instead\./);
 });
 
 test("the guide is read from the base commit, not from the pull request", () => {

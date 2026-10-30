@@ -74,7 +74,7 @@ test("a pull request from a fork or a draft is not reviewed", () => {
 test("a manual run refuses a pull request given as anything but a number", () => {
   const prepare = review("Check the pull request");
   assert.ok(prepare.includes("'' | *[!0-9]*)"), "a URL or other text reaches gh pr view");
-  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf("gh pr view"), "the number is checked after gh pr view runs");
+  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf('gh pr view "$PR_NUMBER"'), "the number is checked after gh pr view runs");
 });
 
 test("no run script interpolates text that the pull request's author controls", () => {

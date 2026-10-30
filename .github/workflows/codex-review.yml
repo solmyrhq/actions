@@ -141,7 +141,6 @@ jobs:
                       exit 1
                   fi
                   gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,title,body,baseRefName,baseRefOid,headRefName,headRefOid > "$context/pull-request.json"
-                  gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" > "$context/diff.patch"
                   # gh exits with an error when --slurp and --jq are both given.
                   list() {
                       gh api "$1" --paginate --slurp > "$RUNNER_TEMP/codex-review/pages.json"
@@ -172,6 +171,10 @@ jobs:
                   }' > "$RUNNER_TEMP/codex-review/pages.json"
                   jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' "$RUNNER_TEMP/codex-review/pages.json" > "$context/threads.json"
                   rm "$RUNNER_TEMP/codex-review/pages.json"
+                  if ! gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" > "$context/diff.patch"; then
+                      rm -f "$context/diff.patch"
+                      echo "::warning::gh pr diff failed for pull request #$PR_NUMBER. Codex will read each file's patch from files.json instead."
+                  fi
                   echo "path=$context" >> "$GITHUB_OUTPUT"
 
             # The package includes the bubblewrap and ripgrep builds that Codex
@@ -270,6 +273,9 @@ jobs:
               run: |
                   prompt=$(printf '%s\n\nThe pull request'"'"'s files are in %s.\n\nReview pull request #%s in %s at head commit %s.\n' \
                       "$(cat "$HARNESS/prompt.md")" "$CONTEXT" "$PR_NUMBER" "$REPOSITORY" "$HEAD_SHA")
+                  if [ ! -e "$CONTEXT/diff.patch" ]; then
+                      prompt=$(printf '%s\n\ndiff.patch is missing because the GitHub API returned an error instead of the diff of this pull request. Read the patch of each file from files.json instead.\n' "$prompt")
+                  fi
                   "$CODEX" exec \
                       --strict-config \
                       --ephemeral \
