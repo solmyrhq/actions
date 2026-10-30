@@ -81,12 +81,16 @@ function writeStructured(directory, review, headSha) {
 
 // Checks the review files in `directory` and adds `marker` to the summary and
 // to every inline comment. Returns the number of inline comments.
+//
+// A review may quote an earlier comment, which starts with a marker. A quoted
+// marker is safe only while review-publish reads a marker at the start of a
+// body and nowhere else.
 function check(directory, markerName, marker, headSha) {
-  const markerPrefix = `<!-- ${markerName}:`;
+  const startsWithMarker = (text) => text.trimStart().startsWith(`<!-- ${markerName}:`);
   const summaryFile = path.join(directory, "summary.md");
   const summary = fs.existsSync(summaryFile) ? fs.readFileSync(summaryFile, "utf8") : "";
   if (summary.trim() === "") throw new Error("The review wrote no summary.");
-  if (summary.includes(markerPrefix)) throw new Error("The summary already carries a marker.");
+  if (startsWithMarker(summary)) throw new Error("The summary already starts with a marker.");
 
   const resolveFile = path.join(directory, "resolve.json");
   let resolve = { threads: [] };
@@ -113,7 +117,7 @@ function check(directory, markerName, marker, headSha) {
     }
     const issue = commentProblem(comment, headSha);
     if (issue) throw new Error(`${name} is not a valid inline comment: it ${issue}.`);
-    if (comment.body.includes(markerPrefix)) throw new Error(`${name} already carries a marker.`);
+    if (startsWithMarker(comment.body)) throw new Error(`${name} already starts with a marker.`);
     return [name, comment];
   });
 

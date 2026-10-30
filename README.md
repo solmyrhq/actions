@@ -31,7 +31,7 @@ ssh uses the settings in the SSH config only when the host name in the destinati
 
 ## tailnet-http
 
-This action joins the tailnet in the same way as `tailnet-ssh`. For the rest of the job, it serves an HTTP proxy into the tailnet on a loopback port. A process can connect to the tailnet only through the proxy. The proxy has no authentication. While the job runs, any process on the runner can use the proxy. Thus, the proxy is not a security boundary. The `http-proxy` output is the URL of the proxy. Set `HTTPS_PROXY` to this URL only in the environment of the process that must connect to the tailnet.
+This action joins the tailnet in the same way as `tailnet-ssh`. For the rest of the job, it serves an HTTP proxy into the tailnet on a loopback port. The `http-proxy` output is the URL of the proxy. Give the proxy only to the process that must connect to the tailnet: set `HTTPS_PROXY` to this URL only in the environment of that process. As for `tailnet-ssh`, the socket of `tailscaled` is a second route to the tailnet. This socket is in the action's directory under `RUNNER_TEMP`. The proxy and the socket have no authentication. While the job runs, any process on the runner can use the proxy or the socket. Thus, neither is a security boundary.
 
 ```yaml
 - id: tailnet
@@ -129,13 +129,13 @@ The final message of the model is the review, as a JSON object that matches `out
 
 ## skills
 
-This action holds the `exhaustive-review` skill and the tool mappings that the skill links to. The Claude, Codex and OpenCode reviews all load the skill from here. The `path` output of the action is this directory. The action has one step. This step checks that these files are not empty: `SKILL.md`, each file in `references/`, `codex-tools.md` and `opencode-tools.md`.
+This action holds the `exhaustive-review` skill and the tool mappings that the skill links to. The Claude, Codex and OpenCode reviews all load the skill from here. The `path` output of the action is this directory. The action has one step. This step checks that these files are not empty: `SKILL.md`, `agents/openai.yaml`, each file in `references/`, `codex-tools.md` and `opencode-tools.md`. Codex reads `agents/openai.yaml`. Because this file sets `allow_implicit_invocation` to `false`, Codex loads the skill only when the prompt names it.
 
 The files in `skills/` are copies of these files in the agent-config repository: `skills/exhaustive-review/`, `skills/codex-tools.md` and `skills/opencode-tools.md`. Every file in `skills/exhaustive-review/` is a copy, including the CI references `references/ci-opencode.md` and `references/ci-codex.md`. To change a file, change it in agent-config first. Then copy the changed file here.
 
 ## review-check
 
-The review job runs this action after the model finishes. The action checks the files that the model wrote under `directory`: a non-empty `summary.md`, a valid inline comment on the head commit in each `comment-*.json`, and a valid `resolve.json`. `resolve.json` is optional. If `resolve.json` is missing or empty, the action uses an empty list of threads and writes this list to `resolve.json`. Each thread in `resolve.json` must also be listed in the summary. The action then adds this run's marker, `<!-- <marker>:<head sha>:<run id>:<run attempt> -->`, as the first line of the summary and of each inline comment. The action fails if the model already wrote a marker, if `summary.md` is missing or empty, or if `resolve.json` or a `comment-*.json` file is malformed.
+The review job runs this action after the model finishes. The action checks the files that the model wrote under `directory`: a non-empty `summary.md`, a valid inline comment on the head commit in each `comment-*.json`, and a valid `resolve.json`. `resolve.json` is optional. If `resolve.json` is missing or empty, the action uses an empty list of threads and writes this list to `resolve.json`. Each thread in `resolve.json` must also be listed in the summary. The action then adds this run's marker, `<!-- <marker>:<head sha>:<run id>:<run attempt> -->`, as the first line of the summary and of each inline comment. The action fails if `summary.md` is missing or empty, or if `resolve.json` or a `comment-*.json` file is not valid. It also fails if the summary does not list a thread in `resolve.json`, or if the summary or an inline comment already starts with a marker. A marker lower in the text is allowed, because a review can quote an earlier comment.
 
 If `structured-review` is set, it is the path of a JSON file that holds the final message of Codex. Before the checks, the action reads that file and writes the files above from it.
 

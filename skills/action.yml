@@ -16,7 +16,10 @@ runs:
         - id: locate
           shell: bash
           run: |
-              for file in exhaustive-review/SKILL.md exhaustive-review/references/ci.md exhaustive-review/references/ci-opencode.md exhaustive-review/references/ci-codex.md codex-tools.md opencode-tools.md; do
+              for file in exhaustive-review/SKILL.md exhaustive-review/agents/openai.yaml exhaustive-review/references/ci.md exhaustive-review/references/ci-opencode.md exhaustive-review/references/ci-codex.md codex-tools.md opencode-tools.md; do
                   test -s "$GITHUB_ACTION_PATH/$file"
+              done
+              for file in "$GITHUB_ACTION_PATH"/exhaustive-review/references/*; do
+                  test -s "$file"
               done
               echo "path=$GITHUB_ACTION_PATH" >> "$GITHUB_OUTPUT"

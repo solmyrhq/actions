@@ -41,13 +41,20 @@ test("a review with no summary fails", () => {
   assert.throws(() => lib.check(scratch({ "summary.md": "  \n" }), "codex-code-review", MARKER, SHA), /no summary/);
 });
 
-test("a marker that the model wrote itself is refused", () => {
+test("a text that the model started with a marker is refused", () => {
   const forged = `<!-- codex-code-review:${SHA}:1:1 -->`;
-  assert.throws(() => lib.check(scratch({ "summary.md": `x\n${forged}` }), "codex-code-review", MARKER, SHA), /already carries a marker/);
+  assert.throws(() => lib.check(scratch({ "summary.md": `\n${forged}\nx` }), "codex-code-review", MARKER, SHA), /already starts with a marker/);
   assert.throws(
     () => lib.check(scratch({ "summary.md": "x", "comment-01.json": comment({ body: `${forged}\nx` }) }), "codex-code-review", MARKER, SHA),
-    /already carries a marker/,
+    /already starts with a marker/,
   );
+});
+
+test("a marker quoted below the start of the summary or a comment is allowed", () => {
+  const quoted = `> <!-- codex-code-review:${SHA}:1:1 -->\n> An earlier finding.`;
+  const directory = scratch({ "summary.md": `Not yet addressed:\n${quoted}`, "comment-01.json": comment({ body: `x\n${quoted}` }) });
+  assert.equal(lib.check(directory, "codex-code-review", MARKER, SHA), 1);
+  assert.ok(read(directory, "summary.md").startsWith(`${MARKER}\n`));
 });
 
 test("an inline comment on another commit, or with no line or side, is refused", () => {

@@ -37,7 +37,7 @@ test("Codex runs the skill only when the prompt names it", () => {
 
 test("the action checks every file that a review links to, and outputs its own directory", () => {
   const action = fs.readFileSync(path.join(__dirname, "action.yml"), "utf8");
-  for (const file of ["exhaustive-review/SKILL.md", "references/ci.md", "references/ci-opencode.md", "references/ci-codex.md", "codex-tools.md", "opencode-tools.md"]) {
+  for (const file of ["exhaustive-review/SKILL.md", "exhaustive-review/agents/openai.yaml", "references/ci.md", "references/ci-opencode.md", "references/ci-codex.md", "codex-tools.md", "opencode-tools.md"]) {
     assert.ok(action.includes(file), `the action does not check ${file}`);
   }
   assert.ok(action.includes('echo "path=$GITHUB_ACTION_PATH" >> "$GITHUB_OUTPUT"'));

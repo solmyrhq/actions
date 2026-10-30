@@ -2,13 +2,17 @@ name: Check a review
 description: >-
   Checks the summary, inline comments and threads to resolve that a model wrote
   for a pull request review, and adds this run's marker to the summary and to
-  each inline comment. Fails if any file is missing or malformed.
+  each inline comment. The action fails if summary.md is missing or empty, or
+  if resolve.json or a comment-*.json file is not valid. It also fails if the
+  summary does not list a thread in resolve.json, or if the summary or an
+  inline comment already starts with a marker.
 
 inputs:
   directory:
     description: >-
-      Directory that holds summary.md, resolve.json and comment-*.json. When
-      `structured-review` is set, it must be empty.
+      Directory that holds summary.md. It can also hold resolve.json and
+      comment-*.json files. When `structured-review` is set, the directory must
+      be empty.
     required: true
   marker:
     description: Name of the review's marker, such as `codex-code-review`.
