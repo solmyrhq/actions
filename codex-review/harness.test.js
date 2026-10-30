@@ -75,6 +75,17 @@ test("every object in the output schema is closed and requires all of its proper
   visit(SCHEMA, "review");
 });
 
+test("the schema refuses what review-check refuses, using only keywords that strict structured output accepts", () => {
+  const comment = SCHEMA.properties.comments.items.properties;
+  assert.equal(comment.line.minimum, 1);
+  assert.equal(comment.start_line.minimum, 1);
+  const texts = [comment.path, comment.body, SCHEMA.properties.summary, ...Object.values(SCHEMA.properties.resolve.items.properties)];
+  for (const text of texts) assert.equal(text.pattern, "\\S");
+  // OpenAI's strict structured-output mode fails the request on a keyword
+  // that it does not support, such as minLength, maxLength, allOf or if.
+  assert.doesNotMatch(JSON.stringify(SCHEMA), /"(minLength|maxLength|allOf|if|then)"/);
+});
+
 test("the prompt names the skill and says the run is in CI in Codex", () => {
   const prompt = fs.readFileSync(path.join(HERE, "prompt.md"), "utf8");
   assert.match(prompt, /^\$exhaustive-review /);

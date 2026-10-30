@@ -10,16 +10,16 @@
                 "additionalProperties": false,
                 "required": ["path", "line", "side", "start_line", "start_side", "body"],
                 "properties": {
-                    "path": { "type": "string" },
-                    "line": { "type": "integer" },
+                    "path": { "type": "string", "pattern": "\\S" },
+                    "line": { "type": "integer", "minimum": 1 },
                     "side": { "type": "string", "enum": ["RIGHT", "LEFT"] },
-                    "start_line": { "type": ["integer", "null"] },
+                    "start_line": { "type": ["integer", "null"], "minimum": 1 },
                     "start_side": { "type": ["string", "null"], "enum": ["RIGHT", "LEFT", null] },
-                    "body": { "type": "string" }
+                    "body": { "type": "string", "pattern": "\\S" }
                 }
             }
         },
-        "summary": { "type": "string" },
+        "summary": { "type": "string", "pattern": "\\S" },
         "resolve": {
             "type": "array",
             "items": {
@@ -27,8 +27,8 @@
                 "additionalProperties": false,
                 "required": ["id", "reason"],
                 "properties": {
-                    "id": { "type": "string" },
-                    "reason": { "type": "string" }
+                    "id": { "type": "string", "pattern": "\\S" },
+                    "reason": { "type": "string", "pattern": "\\S" }
                 }
             }
         }

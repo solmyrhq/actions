@@ -34,6 +34,19 @@ function runMarker(name, headSha, runId, runAttempt) {
 const isPositiveInteger = (value) => Number.isInteger(value) && value > 0;
 const isNonEmptyString = (value) => typeof value === "string" && value.trim() !== "";
 
+// The model in an OpenCode review may copy the shape of
+// codex-review/output-schema.json, where a single-line comment has a null
+// start_line and start_side.
+const hasStart = (comment) => (comment.start_line ?? null) !== null || (comment.start_side ?? null) !== null;
+
+// Returns the comment to post to GitHub, with no start keys if it is a
+// single-line comment.
+function postable(comment) {
+  if (hasStart(comment)) return comment;
+  const { start_line: _line, start_side: _side, ...rest } = comment;
+  return rest;
+}
+
 function commentProblem(comment, headSha) {
   if (comment === null || typeof comment !== "object" || Array.isArray(comment)) return "is not an object";
   if (!isNonEmptyString(comment.body)) return "has no body";
@@ -41,8 +54,7 @@ function commentProblem(comment, headSha) {
   if (!isNonEmptyString(comment.path)) return "has no path";
   if (!isPositiveInteger(comment.line)) return "has no line";
   if (!SIDES.includes(comment.side)) return "has no side";
-  const hasStart = "start_line" in comment || "start_side" in comment;
-  if (hasStart) {
+  if (hasStart(comment)) {
     if (!isPositiveInteger(comment.start_line) || comment.start_line >= comment.line) return "has a start_line that is not before its line";
     if (!SIDES.includes(comment.start_side)) return "has a start_line with no start_side";
   }
@@ -68,10 +80,11 @@ function writeStructured(directory, review, headSha) {
 
   review.comments.forEach((comment, index) => {
     const file = { body: comment?.body, commit_id: headSha, path: comment?.path, line: comment?.line, side: comment?.side };
-    // In codex-review/output-schema.json, start_side cannot be made required
-    // only when start_line is set.
-    if (comment?.start_line !== null && comment?.start_line !== undefined) {
-      file.start_line = comment.start_line;
+    // These rules can't be written in codex-review/output-schema.json:
+    // start_side is required if start_line is set, and start_line is before line.
+    const start = comment?.start_line;
+    if (Number.isInteger(start) && Number.isInteger(comment?.line) && start < comment.line) {
+      file.start_line = start;
       file.start_side = comment.start_side ?? comment.side;
     }
     const name = `comment-${String(index + 1).padStart(3, "0")}.json`;
@@ -126,7 +139,7 @@ function check(directory, markerName, marker, headSha) {
   fs.writeFileSync(summaryFile, `${marker}\n${summary}`);
   fs.writeFileSync(resolveFile, `${JSON.stringify(resolve, null, 4)}\n`);
   for (const [name, comment] of comments) {
-    fs.writeFileSync(path.join(directory, name), `${JSON.stringify({ ...comment, body: `${marker}\n${comment.body}` }, null, 4)}\n`);
+    fs.writeFileSync(path.join(directory, name), `${JSON.stringify({ ...postable(comment), body: `${marker}\n${comment.body}` }, null, 4)}\n`);
   }
   return comments.length;
 }

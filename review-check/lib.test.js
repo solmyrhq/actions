@@ -70,13 +70,32 @@ test("an inline comment on another commit, or with no line or side, is refused",
 test("a multi-line comment needs a start line before its line and a start side", () => {
   const ok = scratch({ "summary.md": "x", "comment-01.json": comment({ start_line: 1, start_side: "RIGHT" }) });
   assert.equal(lib.check(ok, "codex-code-review", MARKER, SHA), 1);
-  for (const bad of [{ start_line: 3, start_side: "RIGHT" }, { start_line: 1 }, { start_line: null, start_side: null }]) {
+  for (const bad of [{ start_line: 3, start_side: "RIGHT" }, { start_line: 1 }, { start_line: null, start_side: "RIGHT" }]) {
     assert.throws(
       () => lib.check(scratch({ "summary.md": "x", "comment-01.json": comment(bad) }), "codex-code-review", MARKER, SHA),
       /start_/,
       JSON.stringify(bad),
     );
   }
+});
+
+test("a comment whose start line and side are both null is a single-line comment, posted without them", () => {
+  const directory = scratch({ "summary.md": "x", "comment-01.json": comment({ start_line: null, start_side: null }) });
+  assert.equal(lib.check(directory, "codex-code-review", MARKER, SHA), 1);
+  const written = JSON.parse(read(directory, "comment-01.json"));
+  assert.ok(!("start_line" in written) && !("start_side" in written));
+});
+
+test("a structured comment whose range runs backwards becomes a comment on its last line", () => {
+  const directory = scratch();
+  lib.writeStructured(directory, {
+    comments: [{ path: "a.ts", line: 3, side: "RIGHT", start_line: 5, start_side: "RIGHT", body: "x" }],
+    summary: "x",
+    resolve: [],
+  }, SHA);
+  const written = JSON.parse(read(directory, "comment-001.json"));
+  assert.ok(!("start_line" in written));
+  assert.equal(lib.check(directory, "codex-code-review", MARKER, SHA), 1);
 });
 
 test("a thread to resolve must have an id and a reason, and the summary must list it", () => {
