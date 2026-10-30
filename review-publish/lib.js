@@ -96,8 +96,22 @@ function refusal(node, repository, pr, markerName) {
   return undefined;
 }
 
-async function publish({ github, repository, pr, markerName, marker, directory, log }) {
+// Returns the marker that review-check wrote on the summary's first line, and
+// throws unless it is a `markerName` marker for `headSha`. The marker holds the
+// review job's run attempt, which is lower than this job's when only the
+// publish job is re-run.
+function summaryMarker(summary, markerName, headSha) {
+  const first = summary.split("\n", 1)[0];
+  const expected = new RegExp(`^<!-- ${markerName}:${headSha}:\\d+:\\d+ -->$`);
+  if (!expected.test(first)) {
+    throw new Error(`The summary does not start with a ${markerName} marker for ${headSha}. Was it checked by review-check?`);
+  }
+  return first;
+}
+
+async function publish({ github, repository, pr, markerName, headSha, directory, log }) {
   let summary = fs.readFileSync(path.join(directory, "summary.md"), "utf8");
+  const marker = summaryMarker(summary, markerName, headSha);
   const comments = fs.readdirSync(directory).filter((name) => /^comment-.*\.json$/.test(name)).sort();
   let failed = false;
 
@@ -144,9 +158,9 @@ async function publish({ github, repository, pr, markerName, marker, directory, 
 
   const posted = await github.paginate(`/repos/${repository}/issues/${pr}/comments`);
   if (!posted.some((comment) => comment.user?.login === BOT.rest && (comment.body ?? "").startsWith(marker))) {
-    throw new Error(`No summary comment on pull request #${pr} starts with this run's marker ${marker}.`);
+    throw new Error(`No summary comment on pull request #${pr} starts with the review's marker ${marker}.`);
   }
   return { failed };
 }
 
-module.exports = { nextLink, client, refusal, publish };
+module.exports = { nextLink, client, refusal, summaryMarker, publish };

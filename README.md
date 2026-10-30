@@ -146,4 +146,8 @@ The publish job runs this action with the workflow's `GITHUB_TOKEN`. The token m
 1. It posts each inline comment. If GitHub rejects a comment, the action adds the comment to the summary instead.
 2. It posts the summary.
 3. It resolves each thread in `resolve.json` that is unresolved, is on this pull request in this repository, and has a first comment by `github-actions` that starts with this review's marker. If `resolve.json` lists any other thread that is not already resolved, the action does not resolve it, and fails after it completes the other steps.
-4. It fails if no comment on the pull request by `github-actions[bot]` starts with this run's marker.
+4. It fails if no comment on the pull request by `github-actions[bot]` starts with the review's marker.
+
+The `review-check` action writes the review's marker as the first line of `summary.md`. The `review-publish` action reads the marker from that line. If that line is not a marker for this review and the head commit, the action posts nothing and fails. The marker contains the run attempt of the review job. If you re-run only the publish job, the run attempt of the publish job is higher than the run attempt in the marker. The action does not use the run attempt of the publish job.
+
+The runner reads a log line that starts with `::` as a workflow command. The action escapes each line break in the text that it logs. Thus, text from the model or the pull request cannot start a new log line.

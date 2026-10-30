@@ -23,8 +23,19 @@ function appendCommandFile(variable, name, value) {
 const saveState = (name, value) => appendCommandFile("GITHUB_STATE", name, value);
 const setOutput = (name, value) => appendCommandFile("GITHUB_OUTPUT", name, value);
 
+// Text that a model or a pull request chose must not start a log line: the
+// runner reads a line that starts with `::` as a workflow command.
+function escapeData(text) {
+  return String(text).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
 function annotate(level, message) {
-  console.log(`::${level}::${message.replace(/%/g, "%25").replace(/\r?\n/g, "%0A")}`);
+  console.log(`::${level}::${escapeData(message)}`);
+}
+
+// Logs `message` as one line, with its line breaks escaped.
+function info(message) {
+  console.log(escapeData(message));
 }
 
 function run(main) {
@@ -34,4 +45,4 @@ function run(main) {
   });
 }
 
-module.exports = { input, saveState, setOutput, annotate, run };
+module.exports = { input, saveState, setOutput, escapeData, annotate, info, run };

@@ -7,7 +7,8 @@ const path = require("node:path");
 const { test } = require("node:test");
 const lib = require("./lib.js");
 
-const MARKER = "<!-- codex-code-review:0123456789abcdef0123456789abcdef01234567:42:1 -->";
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const MARKER = `<!-- codex-code-review:${SHA}:42:1 -->`;
 
 function scratch({ summary = `${MARKER}\nSummary.`, comments = [], threads = [] } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "review-publish-"));
@@ -55,7 +56,22 @@ function fakeGitHub({ failPosts = [], threads = {}, posted } = {}) {
 
 const quiet = { info() {}, warning() {} };
 const run = (github, directory) =>
-  lib.publish({ github, repository: "solmyrhq/x", pr: 7, markerName: "codex-code-review", marker: MARKER, directory, log: quiet });
+  lib.publish({ github, repository: "solmyrhq/x", pr: 7, markerName: "codex-code-review", headSha: SHA, directory, log: quiet });
+
+test("the marker comes from the summary's first line, so a re-run of only the publish job finds it", async () => {
+  const older = `<!-- codex-code-review:${SHA}:42:1 -->`;
+  assert.equal(lib.summaryMarker(`${older}\nSummary.`, "codex-code-review", SHA), older);
+  const github = fakeGitHub();
+  assert.deepEqual(await run(github, scratch({ summary: `${older}\nSummary.` })), { failed: false });
+});
+
+test("a summary that does not start with this review's marker for the head commit is not posted", async () => {
+  for (const summary of ["Summary.", `<!-- opencode-code-review:${SHA}:42:1 -->\nx`, `<!-- codex-code-review:${"f".repeat(40)}:42:1 -->\nx`]) {
+    const github = fakeGitHub();
+    await assert.rejects(run(github, scratch({ summary })), /does not start with a codex-code-review marker/);
+    assert.equal(github.calls.length, 0, summary);
+  }
+});
 
 test("inline comments are posted before the summary, in file order", async () => {
   const github = fakeGitHub();
