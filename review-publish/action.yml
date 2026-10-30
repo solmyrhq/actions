@@ -7,8 +7,12 @@ description: >-
 inputs:
   token:
     description: >-
-      A token that can write to the pull request. resolveReviewThread also
-      needs `contents: write`.
+      The workflow's GITHUB_TOKEN, with the `pull-requests: write` and
+      `contents: write` permissions. The resolveReviewThread mutation fails
+      without `contents: write`. Do not use a different token. The action finds
+      the comments and threads of the review by their author. That author is
+      `github-actions`, or `github-actions[bot]` in the REST API, only when the
+      token is GITHUB_TOKEN.
     required: true
   directory:
     description: Directory that holds the checked summary.md, resolve.json and comment-*.json.

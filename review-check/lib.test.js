@@ -111,6 +111,18 @@ test("a structured review is written as numbered comment files on the head commi
   assert.deepEqual(JSON.parse(read(directory, "resolve.json")), { threads: [{ id: "PRRT_1", reason: "Fixed." }] });
 });
 
+test("a structured comment with a start line and no start side takes the comment's side", () => {
+  const directory = scratch();
+  lib.writeStructured(directory, {
+    comments: [{ path: "a.ts", line: 9, side: "LEFT", start_line: 7, start_side: null, body: "x" }],
+    summary: "x",
+    resolve: [],
+  }, SHA);
+  const written = JSON.parse(read(directory, "comment-001.json"));
+  assert.equal(written.start_side, "LEFT");
+  assert.equal(lib.check(directory, "codex-code-review", MARKER, SHA), 1);
+});
+
 test("a structured review that is missing a field, or a directory that already has files, is refused", () => {
   assert.throws(() => lib.writeStructured(scratch(), { comments: [], resolve: [] }, SHA), /no summary/);
   assert.throws(() => lib.writeStructured(scratch(), { summary: "x", resolve: [] }, SHA), /no list of comments/);

@@ -141,7 +141,7 @@ If `structured-review` is set, it is the path of a JSON file that holds the fina
 
 ## review-publish
 
-The publish job runs this action with a token that can write to the pull request. The action runs no model. It uses only the files that `review-check` passed, and does these steps in this order:
+The publish job runs this action with the workflow's `GITHUB_TOKEN`. The token must have the `pull-requests: write` and `contents: write` permissions. Do not use a different token. The action finds the comments and threads of the review by their author. That author is `github-actions`, or `github-actions[bot]` in the REST API, only when the token is `GITHUB_TOKEN`. The action runs no model. It uses only the files that `review-check` passed, and does these steps in this order:
 
 1. It posts each inline comment. If GitHub rejects a comment, the action adds the comment to the summary instead.
 2. It posts the summary.

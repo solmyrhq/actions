@@ -68,9 +68,11 @@ function writeStructured(directory, review, headSha) {
 
   review.comments.forEach((comment, index) => {
     const file = { body: comment?.body, commit_id: headSha, path: comment?.path, line: comment?.line, side: comment?.side };
+    // In codex-review/output-schema.json, start_side cannot be made required
+    // only when start_line is set.
     if (comment?.start_line !== null && comment?.start_line !== undefined) {
       file.start_line = comment.start_line;
-      file.start_side = comment.start_side;
+      file.start_side = comment.start_side ?? comment.side;
     }
     const name = `comment-${String(index + 1).padStart(3, "0")}.json`;
     fs.writeFileSync(path.join(directory, name), `${JSON.stringify(file, null, 4)}\n`);
