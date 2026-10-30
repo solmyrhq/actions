@@ -21,7 +21,7 @@ function scratch({ summary = `${MARKER}\nSummary.`, comments = [], threads = [] 
 
 const thread = (overrides = {}) => ({
   isResolved: false,
-  pullRequest: { number: 7 },
+  pullRequest: { number: 7, repository: { nameWithOwner: "solmyrhq/x" } },
   comments: { nodes: [{ author: { login: "github-actions" }, body: `<!-- codex-code-review:abc:1:1 -->\nx` }] },
   ...overrides,
 });
@@ -83,11 +83,12 @@ test("a nominated thread that this review opened on this pull request is resolve
   assert.ok(github.calls.some(([kind, id]) => kind === "RESOLVE" && id === "PRRT_1"));
 });
 
-test("a thread from a person, another review, another pull request or nowhere is refused", async () => {
+test("a thread from a person, another review, another pull request, another repository or nowhere is refused", async () => {
   const cases = {
     person: thread({ comments: { nodes: [{ author: { login: "pocketarc" }, body: "<!-- codex-code-review:a:1:1 -->" }] } }),
     opencode: thread({ comments: { nodes: [{ author: { login: "github-actions" }, body: "<!-- opencode-code-review:a:1:1 -->" }] } }),
-    elsewhere: thread({ pullRequest: { number: 8 } }),
+    elsewhere: thread({ pullRequest: { number: 8, repository: { nameWithOwner: "solmyrhq/x" } } }),
+    otherRepository: thread({ pullRequest: { number: 7, repository: { nameWithOwner: "solmyrhq/y" } } }),
     missing: null,
   };
   for (const [name, node] of Object.entries(cases)) {

@@ -8,7 +8,7 @@ When you use an action from this repository, pin it to a full commit SHA.
 
 ## tailnet-ssh
 
-This action joins the tailnet as an ephemeral node for the rest of the job and writes an SSH config for connecting to one host over it. The self-hosted runners cannot use `tailscale/github-action`: it runs `tailscaled` with `sudo`, and the runner user has no `sudo`. This action runs `tailscaled` as the runner user in userspace-networking mode, so the VM's routes and DNS do not change. Only connections made through the SSH config reach the tailnet. When the job ends, whether it passed, failed or was cancelled, the action logs the node out, stops `tailscaled` and deletes its files.
+This action joins the tailnet as an ephemeral node for the rest of the job and writes an SSH config for connecting to one host over it. The self-hosted runners cannot use `tailscale/github-action`: it runs `tailscaled` with `sudo`, and the runner user has no `sudo`. This action runs `tailscaled` as the runner user in userspace-networking mode, so the VM's routes and DNS do not change. A connection can reach the tailnet only through the socket of `tailscaled`. With the SSH config, ssh connects through this socket. While the job runs, any process on the runner can use the socket. Thus, the socket is not a security boundary. When the job ends, whether it passed, failed or was cancelled, the action logs the node out, stops `tailscaled` and deletes its files.
 
 ```yaml
 - id: tailnet
@@ -31,7 +31,7 @@ ssh uses the settings in the SSH config only when the host name in the destinati
 
 ## tailnet-http
 
-This action joins the tailnet in the same way as `tailnet-ssh`. For the rest of the job, it serves an HTTP proxy into the tailnet on a loopback port. Only a process that uses the proxy can connect to the tailnet. The `http-proxy` output is the URL of the proxy. Set `HTTPS_PROXY` to this URL only in the environment of the process that must connect to the tailnet.
+This action joins the tailnet in the same way as `tailnet-ssh`. For the rest of the job, it serves an HTTP proxy into the tailnet on a loopback port. A process can connect to the tailnet only through the proxy. The proxy has no authentication. While the job runs, any process on the runner can use the proxy. Thus, the proxy is not a security boundary. The `http-proxy` output is the URL of the proxy. Set `HTTPS_PROXY` to this URL only in the environment of the process that must connect to the tailnet.
 
 ```yaml
 - id: tailnet
@@ -131,11 +131,11 @@ The final message of the model is the review, as a JSON object that matches `out
 
 This action holds the `exhaustive-review` skill and the tool mappings that the skill links to. The Claude, Codex and OpenCode reviews all load the skill from here. The `path` output of the action is this directory. The action has one step. This step checks that these files are not empty: `SKILL.md`, each file in `references/`, `codex-tools.md` and `opencode-tools.md`.
 
-The files in `skills/` are copies of these files in the agent-config repository: `skills/exhaustive-review/`, `skills/codex-tools.md` and `skills/opencode-tools.md`. Change them in agent-config first, then copy each changed file here.
+The files in `skills/` are copies of these files in the agent-config repository: `skills/exhaustive-review/`, `skills/codex-tools.md` and `skills/opencode-tools.md`. Every file in `skills/exhaustive-review/` is a copy, including the CI references `references/ci-opencode.md` and `references/ci-codex.md`. To change a file, change it in agent-config first. Then copy the changed file here.
 
 ## review-check
 
-The review job runs this action after the model finishes. The action checks the files that the model wrote under `directory`: a non-empty `summary.md`, a valid `resolve.json`, and a valid inline comment on the head commit in each `comment-*.json`. Each thread in `resolve.json` must also be listed in the summary. The action then adds this run's marker, `<!-- <marker>:<head sha>:<run id>:<run attempt> -->`, as the first line of the summary and of each inline comment. If the model already wrote a marker, or any file is missing or malformed, the action fails.
+The review job runs this action after the model finishes. The action checks the files that the model wrote under `directory`: a non-empty `summary.md`, a valid inline comment on the head commit in each `comment-*.json`, and a valid `resolve.json`. `resolve.json` is optional. If `resolve.json` is missing or empty, the action uses an empty list of threads and writes this list to `resolve.json`. Each thread in `resolve.json` must also be listed in the summary. The action then adds this run's marker, `<!-- <marker>:<head sha>:<run id>:<run attempt> -->`, as the first line of the summary and of each inline comment. The action fails if the model already wrote a marker, if `summary.md` is missing or empty, or if `resolve.json` or a `comment-*.json` file is malformed.
 
 If `structured-review` is set, it is the path of a JSON file that holds the final message of Codex. Before the checks, the action reads that file and writes the files above from it.
 
@@ -145,5 +145,5 @@ The publish job runs this action with a token that can write to the pull request
 
 1. It posts each inline comment. If GitHub rejects a comment, the action adds the comment to the summary instead.
 2. It posts the summary.
-3. It resolves each thread in `resolve.json` that is unresolved, is on this pull request, and has a first comment by `github-actions` that starts with this review's marker. If `resolve.json` lists any other thread that is not already resolved, the action does not resolve it, and fails after it completes the other steps.
+3. It resolves each thread in `resolve.json` that is unresolved, is on this pull request in this repository, and has a first comment by `github-actions` that starts with this review's marker. If `resolve.json` lists any other thread that is not already resolved, the action does not resolve it, and fails after it completes the other steps.
 4. It fails if no comment on the pull request by `github-actions[bot]` starts with this run's marker.

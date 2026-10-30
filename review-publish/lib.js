@@ -70,7 +70,7 @@ query($threadId: ID!) {
   node(id: $threadId) {
     ... on PullRequestReviewThread {
       isResolved
-      pullRequest { number }
+      pullRequest { number repository { nameWithOwner } }
       comments(first: 1) { nodes { author { login } body } }
     }
   }
@@ -81,11 +81,16 @@ mutation($threadId: ID!) {
   resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
 }`;
 
-// Returns why a thread must not be resolved, or undefined if it may be.
-function refusal(node, pr, markerName) {
+// Returns why a thread must not be resolved, or undefined if it may be. Node
+// IDs are global: with a token that can read other repositories, the query can
+// return a thread on another repository's pull request with the same number.
+function refusal(node, repository, pr, markerName) {
   const first = node?.comments?.nodes?.[0];
+  const where = node?.pullRequest;
   if (node?.isResolved !== false) return `it is not an unresolved review thread (isResolved=${node?.isResolved})`;
-  if (node.pullRequest?.number !== pr) return `it is on pull request ${node.pullRequest?.number}`;
+  if (where?.repository?.nameWithOwner !== repository || where?.number !== pr) {
+    return `it is on ${where?.repository?.nameWithOwner}#${where?.number}`;
+  }
   if (first?.author?.login !== BOT.graphql) return `its first comment is from ${first?.author?.login ?? "nobody"}`;
   if (!(first.body ?? "").startsWith(`<!-- ${markerName}:`)) return `its first comment is not from the ${markerName} review`;
   return undefined;
@@ -122,7 +127,7 @@ async function publish({ github, repository, pr, markerName, marker, directory, 
       log.info(`Already resolved ${id}`);
       continue;
     }
-    const why = refusal(node, pr, markerName);
+    const why = refusal(node, repository, pr, markerName);
     if (why !== undefined) {
       log.warning(`Refusing to resolve ${id}: ${why}.`);
       failed = true;

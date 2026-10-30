@@ -1,7 +1,6 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const net = require("node:net");
 const { test } = require("node:test");
 const lib = require("./lib.js");
 
@@ -40,32 +39,18 @@ test("tailscaled runs in userspace with its state in memory, and takes extra arg
   ]);
 });
 
-test("only a listening socket on 127.0.0.1 and the given port is found in /proc/net/tcp", () => {
-  const table = [
-    "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
-    "   0: 0100007F:A0D5 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 111 1 0000000000000000 100 0 0 10 0",
-    "   1: 00000000:A0D5 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 222 1 0000000000000000 100 0 0 10 0",
-    "   2: 0100007F:A0D5 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 333 1 0000000000000000 20 4 30 10 -1",
-    "   3: 0100007F:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 444 1 0000000000000000 100 0 0 10 0",
-    "",
+test("the proxy's address is read from the line that tailscaled logs when it binds port 0", () => {
+  const log = [
+    "2026/10/30 02:02:08 logtail started",
+    "2026/10/30 02:02:08 HTTP proxy listening on 127.0.0.1:41234",
+    "2026/10/30 02:02:09 wgengine.NewUserspaceEngine(tun \"userspace-networking\") ...",
   ].join("\n");
-  assert.deepEqual(lib.loopbackListenerInodes(table, 0xa0d5), ["111"]);
-  assert.deepEqual(lib.loopbackListenerInodes(table, 80), ["444"]);
-  assert.deepEqual(lib.loopbackListenerInodes(table, 81), []);
+  assert.equal(lib.httpProxyAddress(log), "127.0.0.1:41234");
 });
 
-test("a process is found to listen on a loopback port only while it holds the listening socket", { skip: process.platform !== "linux" }, async () => {
-  const server = net.createServer();
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
-  assert.equal(lib.listensOnLoopback(process.pid, port), true);
-  assert.equal(lib.listensOnLoopback(process.ppid, port), false, "another process was taken for the listener");
-  await new Promise((resolve) => server.close(resolve));
-  assert.equal(lib.listensOnLoopback(process.pid, port), false);
-});
-
-test("the HTTP proxy listens only on loopback, on a valid port", () => {
-  assert.equal(lib.httpProxyListen(8080), "127.0.0.1:8080");
-  assert.throws(() => lib.httpProxyListen(0));
-  assert.throws(() => lib.httpProxyListen(70000));
+test("no address is read from a log without the line, or with an address off loopback or out of range", () => {
+  assert.equal(lib.httpProxyAddress("2026/10/30 logtail started"), undefined);
+  assert.equal(lib.httpProxyAddress("HTTP proxy listening on 0.0.0.0:41234"), undefined);
+  assert.equal(lib.httpProxyAddress("HTTP proxy listening on 127.0.0.1:70000"), undefined);
+  assert.equal(lib.httpProxyAddress("HTTP proxy listening on 127.0.0.1:0"), undefined);
 });

@@ -115,7 +115,7 @@ async function join(prefix, extraDaemonArgs = []) {
   } finally {
     fs.rmSync(authKey, { force: true });
   }
-  return { dir, tailscale, socket, log, pid };
+  return { dir, tailscale, socket, log };
 }
 
 function isRunning(pid) {

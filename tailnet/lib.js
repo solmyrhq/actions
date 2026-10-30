@@ -1,6 +1,5 @@
 "use strict";
 
-const fs = require("node:fs");
 const path = require("node:path");
 
 // Maps RUNNER_ARCH to the architecture in Tailscale's tarball names.
@@ -57,39 +56,12 @@ function daemonArgs({ dir, socket, extra = [] }) {
   return ["--tun=userspace-networking", "--state=mem:", `--statedir=${path.join(dir, "state")}`, `--socket=${socket}`, "--port=0", ...extra];
 }
 
-// Returns the socket inodes listening on 127.0.0.1:<port> in the text of
-// /proc/net/tcp, whose addresses are little-endian hex.
-function loopbackListenerInodes(procNetTcp, port) {
-  const local = `0100007F:${port.toString(16).toUpperCase().padStart(4, "0")}`;
-  const LISTEN = "0A";
-  return procNetTcp
-    .split("\n")
-    .slice(1)
-    .map((line) => line.trim().split(/\s+/))
-    .filter((fields) => fields[1] === local && fields[3] === LISTEN)
-    .map((fields) => fields[9]);
-}
-
-// Whether process `pid` holds a socket that listens on 127.0.0.1:<port>.
-function listensOnLoopback(pid, port, proc = "/proc") {
-  const inodes = new Set(loopbackListenerInodes(fs.readFileSync(path.join(proc, "net/tcp"), "utf8"), port));
-  const fdDir = path.join(proc, String(pid), "fd");
-  return fs.readdirSync(fdDir).some((fd) => {
-    try {
-      const match = /^socket:\[(\d+)\]$/.exec(fs.readlinkSync(path.join(fdDir, fd)));
-      return match !== null && inodes.has(match[1]);
-    } catch {
-      // The descriptor closed between readdir and readlink.
-      return false;
-    }
-  });
-}
-
-function httpProxyListen(port) {
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Not a TCP port: ${port}`);
-  }
-  return `127.0.0.1:${port}`;
+// Returns the address that tailscaled logs after it binds a `:0` proxy listen
+// address, as "HTTP proxy listening on 127.0.0.1:<port>", or undefined if the
+// log has no such line.
+function httpProxyAddress(log) {
+  const match = /HTTP proxy listening on (127\.0\.0\.1:([1-9]\d{0,4}))\b/.exec(log);
+  return match !== null && Number(match[2]) <= 65535 ? match[1] : undefined;
 }
 
 module.exports = {
@@ -99,7 +71,5 @@ module.exports = {
   validateVersion,
   validateSha256,
   daemonArgs,
-  loopbackListenerInodes,
-  listensOnLoopback,
-  httpProxyListen,
+  httpProxyAddress,
 };
