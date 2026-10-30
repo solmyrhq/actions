@@ -68,9 +68,12 @@ test("the pull request's agent files are removed for the run and restored from t
   assert.ok(review("Restore the pull request's agent files").includes(`for path in ${paths}; do`));
 });
 
-test("the sandbox is checked before the model starts", () => {
+test("the sandbox is checked before the model starts, outside the pull request's checkout", () => {
   assert.ok(TEXT.indexOf("- name: Check the Codex sandbox") < TEXT.indexOf("- name: Review the pull request"));
-  assert.match(review("Check the Codex sandbox"), /"\$CODEX" sandbox /);
+  const check = review("Check the Codex sandbox");
+  assert.match(check, /"\$CODEX" sandbox -C "\$empty" -- true/);
+  assert.ok(check.includes('empty="$RUNNER_TEMP/codex-review/sandbox-check"'));
+  assert.doesNotMatch(check, /GITHUB_WORKSPACE/);
 });
 
 test("Codex is installed from a pinned release whose checksum is checked", () => {

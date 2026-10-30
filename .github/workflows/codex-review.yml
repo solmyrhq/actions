@@ -190,7 +190,10 @@ jobs:
                   echo "codex=$dir/bin/codex" >> "$GITHUB_OUTPUT"
 
             # Codex runs the model's commands in bubblewrap, which needs
-            # unprivileged user namespaces on the runner.
+            # unprivileged user namespaces on the runner. The sandbox is checked
+            # in an empty directory because Codex reads project configuration
+            # from .codex/, and the checkout's .codex/ comes from the pull
+            # request.
             - name: Check the Codex sandbox
               id: sandbox
               if: steps.prepare.outputs.review == 'true'
@@ -199,8 +202,9 @@ jobs:
                   CODEX: ${{ steps.install.outputs.codex }}
                   CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
               run: |
-                  mkdir -p "$CODEX_HOME"
-                  "$CODEX" sandbox -C "$GITHUB_WORKSPACE" -- true
+                  empty="$RUNNER_TEMP/codex-review/sandbox-check"
+                  mkdir -p "$CODEX_HOME" "$empty"
+                  "$CODEX" sandbox -C "$empty" -- true
 
             - name: Set up Codex
               id: setup
