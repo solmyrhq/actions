@@ -1,0 +1,40 @@
+name: Prepare a review
+description: >-
+  Reads a pull request through the REST API. Sets `review` to `false` if the
+  pull request is closed, is a draft, or is from a fork. Otherwise sets
+  `review` to `true`, and gives the head and base commits of the pull request
+  and the name of the artifact for the review.
+
+inputs:
+  token:
+    description: A token that can read the pull request, such as the job's GITHUB_TOKEN.
+    required: true
+  pr:
+    description: >-
+      Number of the pull request, as decimal digits. The action refuses a URL,
+      because a URL can identify a pull request in another repository.
+    required: true
+  artifact-prefix:
+    description: First part of the artifact's name, such as `codex-review`.
+    required: true
+
+outputs:
+  review:
+    description: "`true` if the job must review the pull request, `false` if the job must not review it."
+  pr-number:
+    description: Number of the pull request. Set only when `review` is `true`.
+  head-sha:
+    description: The pull request's head commit. Set only when `review` is `true`.
+  base-sha:
+    description: The pull request's base commit. Set only when `review` is `true`.
+  artifact:
+    description: >-
+      Name of the artifact for the review,
+      `<artifact-prefix>-<run id>-<run attempt>`. Give it to the publish job
+      through an output of the review job. If you re-run only the publish job,
+      its run attempt is higher than the run attempt in this name. Set only
+      when `review` is `true`.
+
+runs:
+  using: node24
+  main: main.js
