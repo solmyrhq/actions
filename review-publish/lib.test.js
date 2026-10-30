@@ -28,10 +28,13 @@ const thread = (overrides = {}) => ({
 });
 
 // A GitHub that records each call. `failPosts` lists routes whose POST fails;
-// `threads` maps thread IDs to the node that the query returns.
-function fakeGitHub({ failPosts = [], threads = {}, posted } = {}) {
+// `threads` maps thread IDs to the node that the query returns. A GET of the
+// issue comments returns `posted` when it is set. `inline` and `issue` are the
+// inline and issue comments already on the pull request.
+function fakeGitHub({ failPosts = [], threads = {}, posted, inline = [], issue = [] } = {}) {
   const calls = [];
-  const issueComments = [];
+  const inlineComments = [...inline];
+  const issueComments = [...issue];
   return {
     calls,
     async post(route, body) {
@@ -39,11 +42,13 @@ function fakeGitHub({ failPosts = [], threads = {}, posted } = {}) {
       if (failPosts.some((pattern) => pattern.test(route))) {
         throw new Error("HTTP 422");
       }
-      if (route.endsWith(`/issues/7/comments`)) issueComments.push({ user: { login: "github-actions[bot]" }, body: body.body });
+      const list = route.endsWith("/issues/7/comments") ? issueComments : inlineComments;
+      list.push({ user: { login: "github-actions[bot]" }, body: body.body });
       return {};
     },
     async paginate(route) {
       calls.push(["GET", route]);
+      if (route.endsWith("/pulls/7/comments")) return inlineComments;
       return posted ?? issueComments;
     },
     async graphql(query, variables) {
@@ -78,11 +83,25 @@ test("inline comments are posted before the summary, in file order", async () =>
   const directory = scratch({ comments: [{ body: `${MARKER}\none`, path: "a", line: 1 }, { body: `${MARKER}\ntwo`, path: "b", line: 2 }] });
   assert.deepEqual(await run(github, directory), { failed: false });
   assert.deepEqual(github.calls.map(([method, route, body]) => [method, route, body?.body]), [
+    ["GET", "/repos/solmyrhq/x/pulls/7/comments", undefined],
+    ["GET", "/repos/solmyrhq/x/issues/7/comments", undefined],
     ["POST", "/repos/solmyrhq/x/pulls/7/comments", `${MARKER}\none`],
     ["POST", "/repos/solmyrhq/x/pulls/7/comments", `${MARKER}\ntwo`],
     ["POST", "/repos/solmyrhq/x/issues/7/comments", `${MARKER}\nSummary.`],
     ["GET", "/repos/solmyrhq/x/issues/7/comments", undefined],
   ]);
+});
+
+test("a re-run posts only what an earlier attempt under the same marker did not", async () => {
+  const bot = { login: "github-actions[bot]" };
+  const github = fakeGitHub({
+    inline: [{ user: bot, body: `${MARKER}\none` }, { user: { login: "pocketarc" }, body: `${MARKER}\ntwo` }],
+    issue: [{ user: bot, body: `${MARKER}\nSummary.` }],
+  });
+  const directory = scratch({ comments: [{ body: `${MARKER}\none`, path: "a", line: 1 }, { body: `${MARKER}\ntwo`, path: "b", line: 2 }] });
+  assert.deepEqual(await run(github, directory), { failed: false });
+  const posts = github.calls.filter(([method]) => method === "POST").map(([, route, body]) => [route, body.body]);
+  assert.deepEqual(posts, [["/repos/solmyrhq/x/pulls/7/comments", `${MARKER}\ntwo`]]);
 });
 
 test("a comment that GitHub rejects is added to the summary without its marker", async () => {

@@ -115,8 +115,18 @@ async function publish({ github, repository, pr, markerName, headSha, directory,
   const comments = fs.readdirSync(directory).filter((name) => /^comment-.*\.json$/.test(name)).sort();
   let failed = false;
 
+  // When only the publish job is re-run, the marker is the same, and an earlier
+  // attempt may already have posted some of these comments.
+  const ours = (posted) => posted.user?.login === BOT.rest && (posted.body ?? "").startsWith(marker);
+  const inline = new Set((await github.paginate(`/repos/${repository}/pulls/${pr}/comments`)).filter(ours).map((posted) => posted.body));
+  const summaryPosted = (await github.paginate(`/repos/${repository}/issues/${pr}/comments`)).some(ours);
+
   for (const name of comments) {
     const comment = JSON.parse(fs.readFileSync(path.join(directory, name), "utf8"));
+    if (inline.has(comment.body)) {
+      log.info(`Already posted ${name}`);
+      continue;
+    }
     try {
       await github.post(`/repos/${repository}/pulls/${pr}/comments`, comment);
     } catch (error) {
@@ -125,7 +135,11 @@ async function publish({ github, repository, pr, markerName, headSha, directory,
     }
   }
 
-  await github.post(`/repos/${repository}/issues/${pr}/comments`, { body: summary });
+  if (summaryPosted) {
+    log.info("Already posted the summary");
+  } else {
+    await github.post(`/repos/${repository}/issues/${pr}/comments`, { body: summary });
+  }
 
   const { threads } = JSON.parse(fs.readFileSync(path.join(directory, "resolve.json"), "utf8"));
   for (const { id, reason } of threads) {
@@ -156,8 +170,7 @@ async function publish({ github, repository, pr, markerName, headSha, directory,
     }
   }
 
-  const posted = await github.paginate(`/repos/${repository}/issues/${pr}/comments`);
-  if (!posted.some((comment) => comment.user?.login === BOT.rest && (comment.body ?? "").startsWith(marker))) {
+  if (!(await github.paginate(`/repos/${repository}/issues/${pr}/comments`)).some(ours)) {
     throw new Error(`No summary comment on pull request #${pr} starts with the review's marker ${marker}.`);
   }
   return { failed };

@@ -42,6 +42,10 @@ ignore_default_excludes = false
 
 [model_providers.cliproxy]
 name = "CLIProxyAPI"
+# The commands that the model runs can still read this key from
+# /proc/1/environ, because PID 1 of the sandbox is a Codex helper that holds it.
+# The risk is accepted: the key works only from a tailnet node that has access
+# to CLIProxyAPI under the tailnet policy, and it can be revoked on its own.
 env_key = "CLIPROXY_API_KEY"
 wire_api = "responses"
 # Codex reaches the provider through the tailnet-http action's proxy, and it is
