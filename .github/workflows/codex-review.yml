@@ -1,0 +1,379 @@
+name: Codex review
+
+on:
+    workflow_call:
+        inputs:
+            pr:
+                description: Pull request number, for a manual dispatch.
+                type: string
+                default: ""
+            guide:
+                description: >-
+                    Path of the file in the calling repository that holds the
+                    instructions for agents. The workflow reads this file from
+                    the pull request's base commit.
+                type: string
+                default: CLAUDE.md
+            base-url:
+                description: Base URL of the CLIProxyAPI Responses endpoint, on the tailnet.
+                type: string
+                default: https://linux-bruno.elephant-monitor.ts.net:8317/v1
+            model:
+                description: Model for the review and its sub-agents.
+                type: string
+                default: gpt-6.1-sol
+            effort:
+                description: Reasoning effort for the review and its sub-agents.
+                type: string
+                default: xhigh
+        secrets:
+            CLIPROXY_API_KEY:
+                required: true
+            CODE_REVIEW_TS_OAUTH_SECRET:
+                required: true
+
+permissions: {}
+
+defaults:
+    run:
+        shell: bash
+
+concurrency:
+    group: codex-review-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr }}
+    cancel-in-progress: true
+
+jobs:
+    review:
+        name: Codex review
+        # CODE_REVIEWS is an organization variable, which a repository variable
+        # of the same name overrides. It lists the reviews to run, separated by
+        # commas with no spaces, such as `claude,codex`.
+        if: >-
+            contains(format(',{0},', vars.CODE_REVIEWS), ',codex,') && (
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'pull_request_target' &&
+             github.event.pull_request.head.repo.full_name == github.repository &&
+             !github.event.pull_request.draft))
+        runs-on: [self-hosted, X64]
+        timeout-minutes: 150
+        permissions:
+            contents: read
+            pull-requests: read
+        outputs:
+            review: ${{ steps.prepare.outputs.review }}
+            pr_number: ${{ steps.prepare.outputs.pr_number }}
+            head_sha: ${{ steps.prepare.outputs.head_sha }}
+        steps:
+            - name: Check the pull request
+              id: prepare
+              timeout-minutes: 3
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+                  REPOSITORY: ${{ github.repository }}
+              run: |
+                  if [ -z "$PR_NUMBER" ]; then
+                      echo "No pull request number was supplied." >&2
+                      exit 1
+                  fi
+                  pr_json="$RUNNER_TEMP/pr.json"
+                  if ! gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,isCrossRepository,baseRefOid,headRefOid > "$pr_json"; then
+                      echo "Could not read pull request #$PR_NUMBER." >&2
+                      exit 1
+                  fi
+                  if [ "$(jq -r '.state' "$pr_json")" != "OPEN" ] || [ "$(jq -r '.isDraft' "$pr_json")" = "true" ] || [ "$(jq -r '.isCrossRepository' "$pr_json")" = "true" ]; then
+                      echo "Pull request #$PR_NUMBER is closed, a draft, or from a fork; skipping." >&2
+                      echo "review=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+                  {
+                      echo "review=true"
+                      echo "pr_number=$PR_NUMBER"
+                      echo "head_sha=$(jq -r '.headRefOid' "$pr_json")"
+                      echo "base_sha=$(jq -r '.baseRefOid' "$pr_json")"
+                  } >> "$GITHUB_OUTPUT"
+
+            - name: Check out the pull request
+              id: checkout
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 2
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ steps.prepare.outputs.head_sha }}
+                  fetch-depth: 1
+                  persist-credentials: false
+
+            - name: Get the review harness
+              id: harness
+              if: steps.prepare.outputs.review == 'true'
+              uses: solmyrhq/actions/codex-review@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+
+            - name: Get the review skills
+              id: skills
+              if: steps.prepare.outputs.review == 'true'
+              uses: solmyrhq/actions/skills@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+
+            # The model has no network and no GitHub token, so the workflow
+            # reads everything that the review needs before Codex starts.
+            - name: Read the pull request
+              id: context
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 5
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  PR_NUMBER: ${{ steps.prepare.outputs.pr_number }}
+                  REPOSITORY: ${{ github.repository }}
+                  BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
+                  GUIDE: ${{ inputs.guide }}
+              run: |
+                  context="$RUNNER_TEMP/codex-review/context"
+                  rm -rf "$RUNNER_TEMP/codex-review"
+                  mkdir -p "$context"
+                  if ! gh api "repos/$REPOSITORY/contents/$GUIDE?ref=$BASE_SHA" -H "Accept: application/vnd.github.raw" > "$context/guide.md" || [ ! -s "$context/guide.md" ]; then
+                      echo "Could not read the guide $GUIDE at the base commit $BASE_SHA." >&2
+                      exit 1
+                  fi
+                  gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,title,body,baseRefName,baseRefOid,headRefName,headRefOid > "$context/pull-request.json"
+                  gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" > "$context/diff.patch"
+                  # gh refuses --slurp together with --jq. --slurp writes one
+                  # array of pages, which `add` joins into one list.
+                  list() {
+                      gh api "$1" --paginate --slurp > "$RUNNER_TEMP/codex-review/pages.json"
+                      jq 'add // []' "$RUNNER_TEMP/codex-review/pages.json" > "$2"
+                  }
+                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/files" "$context/files.json"
+                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/comments" "$context/review-comments.json"
+                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" "$context/reviews.json"
+                  list "repos/$REPOSITORY/issues/$PR_NUMBER/comments" "$context/issue-comments.json"
+                  # shellcheck disable=SC2016 # The $variables are GraphQL's, not the shell's.
+                  gh api graphql --paginate --slurp \
+                      -f owner="${REPOSITORY%/*}" \
+                      -f repo="${REPOSITORY#*/}" \
+                      -F number="$PR_NUMBER" \
+                      -f query='
+                  query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        reviewThreads(first: 100, after: $endCursor) {
+                          pageInfo { hasNextPage endCursor }
+                          nodes {
+                            id isResolved isOutdated path line originalLine
+                            comments(first: 100) { nodes { author { login } body createdAt } }
+                          }
+                        }
+                      }
+                    }
+                  }' > "$RUNNER_TEMP/codex-review/pages.json"
+                  jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' "$RUNNER_TEMP/codex-review/pages.json" > "$context/threads.json"
+                  rm "$RUNNER_TEMP/codex-review/pages.json"
+                  echo "path=$context" >> "$GITHUB_OUTPUT"
+
+            # The package holds the bubblewrap and ripgrep builds that Codex
+            # runs. Bump the version and the hash together; the hash is the
+            # release asset's digest on GitHub.
+            - name: Install Codex
+              id: install
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 5
+              run: |
+                  version=0.165.0
+                  sha256=e97c4463d7f146692a955d7b0e1c8cf48f97cd4d616cd45c5dcab2e8d9743316
+                  dir="$RUNNER_TEMP/codex-review/codex"
+                  mkdir -p "$dir"
+                  curl --fail --silent --show-error --location \
+                      "https://github.com/openai/codex/releases/download/rust-v$version/codex-package-x86_64-unknown-linux-musl.tar.gz" \
+                      --output "$dir/codex.tgz"
+                  printf '%s  %s\n' "$sha256" "$dir/codex.tgz" | sha256sum --check --strict
+                  tar --extract --gzip --file "$dir/codex.tgz" --directory "$dir"
+                  rm "$dir/codex.tgz"
+                  echo "codex=$dir/bin/codex" >> "$GITHUB_OUTPUT"
+
+            # Codex runs each command that the model asks for in bubblewrap,
+            # which needs unprivileged user namespaces. Fail here, before the
+            # model starts, if the runner does not allow them.
+            - name: Check the Codex sandbox
+              id: sandbox
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 2
+              env:
+                  CODEX: ${{ steps.install.outputs.codex }}
+                  CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
+              run: |
+                  mkdir -p "$CODEX_HOME"
+                  "$CODEX" sandbox -C "$GITHUB_WORKSPACE" -- true
+
+            - name: Set up Codex
+              id: setup
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 2
+              env:
+                  HARNESS: ${{ steps.harness.outputs.path }}
+                  SKILLS: ${{ steps.skills.outputs.path }}
+              run: |
+                  home="$RUNNER_TEMP/codex-review/home"
+                  mkdir -p "$home/.codex" "$home/.agents/skills" "$RUNNER_TEMP/codex-review/output"
+                  cp "$HARNESS/config.toml" "$home/.codex/config.toml"
+                  cp -R "$SKILLS/exhaustive-review" "$home/.agents/skills/exhaustive-review"
+                  # SKILL.md links to ../codex-tools.md.
+                  cp "$SKILLS/codex-tools.md" "$home/.agents/skills/codex-tools.md"
+
+            # Codex loads skills from the repository's .agents/skills, where a
+            # pull request could add its own copy of exhaustive-review. Codex
+            # ignores the repository's .codex and AGENTS.md through
+            # config.toml, and they are moved out of the way too.
+            - name: Move the pull request's agent files aside
+              id: hide
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 1
+              run: |
+                  for path in .agents .codex AGENTS.md AGENTS.override.md; do
+                      rm -rf "$path"
+                  done
+
+            - name: Join the tailnet
+              id: tailnet
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 3
+              uses: solmyrhq/actions/tailnet-http@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              with:
+                  oauth-secret: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
+                  tags: tag:ci-code-review
+                  # Tailscale drops support for old clients. Bump sha256 with
+                  # the version.
+                  version: 1.98.9
+                  sha256: 11be30ad301d48f84ff52fec34f8a2f78eb3e3dee1be4e9624d19fccc8df5540
+
+            - name: Review the pull request
+              id: review
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 120
+              env:
+                  CODEX: ${{ steps.install.outputs.codex }}
+                  HARNESS: ${{ steps.harness.outputs.path }}
+                  CONTEXT: ${{ steps.context.outputs.path }}
+                  PR_NUMBER: ${{ steps.prepare.outputs.pr_number }}
+                  REPOSITORY: ${{ github.repository }}
+                  HEAD_SHA: ${{ steps.prepare.outputs.head_sha }}
+                  BASE_URL: ${{ inputs.base-url }}
+                  MODEL: ${{ inputs.model }}
+                  EFFORT: ${{ inputs.effort }}
+                  HOME: ${{ runner.temp }}/codex-review/home
+                  CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
+                  # Only the Codex process uses the proxy. config.toml keeps
+                  # it, and the key, out of the commands that the model runs.
+                  HTTPS_PROXY: ${{ steps.tailnet.outputs.http-proxy }}
+                  CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+              run: |
+                  prompt=$(printf '%s\n\nThe pull request'"'"'s files are in %s.\n\nReview pull request #%s in %s at head commit %s.\n' \
+                      "$(cat "$HARNESS/prompt.md")" "$CONTEXT" "$PR_NUMBER" "$REPOSITORY" "$HEAD_SHA")
+                  "$CODEX" exec \
+                      --strict-config \
+                      --ephemeral \
+                      --ignore-rules \
+                      --color never \
+                      --sandbox read-only \
+                      --cd "$GITHUB_WORKSPACE" \
+                      --model "$MODEL" \
+                      -c "model_reasoning_effort=\"$EFFORT\"" \
+                      -c "model_providers.cliproxy.base_url=\"$BASE_URL\"" \
+                      -c "agents.default_subagent_model=\"$MODEL\"" \
+                      -c "agents.default_subagent_reasoning_effort=\"$EFFORT\"" \
+                      --output-schema "$HARNESS/output-schema.json" \
+                      --output-last-message "$RUNNER_TEMP/codex-review/review.json" \
+                      "$prompt" < /dev/null
+
+            - name: Restore the pull request's agent files
+              id: restore
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 1
+              run: |
+                  for path in .agents .codex AGENTS.md AGENTS.override.md; do
+                      git checkout HEAD -- "$path" 2>/dev/null || true
+                  done
+
+            - name: Check that the review changed nothing
+              id: unchanged
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 1
+              run: |
+                  if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+                      echo "The review changed the working tree:" >&2
+                      git status --porcelain --untracked-files=all >&2
+                      exit 1
+                  fi
+
+            # The model can read the key from the Codex process. With no
+            # network, the only way out is the review itself.
+            - name: Check that the review holds no key
+              id: leak
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 1
+              env:
+                  CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+              run: |
+                  if grep -qF -- "$CLIPROXY_API_KEY" "$RUNNER_TEMP/codex-review/review.json"; then
+                      echo "The review contains the CLIProxyAPI key. It was not posted." >&2
+                      exit 1
+                  fi
+
+            - name: Check the review
+              id: check
+              if: steps.prepare.outputs.review == 'true'
+              uses: solmyrhq/actions/review-check@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              with:
+                  directory: ${{ runner.temp }}/codex-review/output
+                  marker: codex-code-review
+                  head-sha: ${{ steps.prepare.outputs.head_sha }}
+                  structured-review: ${{ runner.temp }}/codex-review/review.json
+
+            - name: Upload the review
+              id: upload
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 2
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: codex-review-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/codex-review/output
+                  if-no-files-found: error
+                  retention-days: 1
+
+            - name: Remove Codex and its state
+              id: cleanup
+              if: always()
+              timeout-minutes: 1
+              run: rm -rf "$RUNNER_TEMP/codex-review" "$RUNNER_TEMP/pr.json"
+
+    publish:
+        name: Post the Codex review
+        needs: review
+        if: needs.review.result == 'success' && needs.review.outputs.review == 'true'
+        runs-on: [self-hosted, X64]
+        timeout-minutes: 30
+        permissions:
+            contents: write # The resolveReviewThread mutation fails without it.
+            pull-requests: write
+        steps:
+            - name: Download the review
+              id: download
+              timeout-minutes: 2
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: codex-review-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/codex-review-output
+
+            - name: Post the review
+              id: publish
+              timeout-minutes: 25
+              uses: solmyrhq/actions/review-publish@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              with:
+                  token: ${{ github.token }}
+                  directory: ${{ runner.temp }}/codex-review-output
+                  marker: codex-code-review
+                  pr: ${{ needs.review.outputs.pr_number }}
+                  head-sha: ${{ needs.review.outputs.head_sha }}
+
+            - name: Remove the review files
+              id: cleanup
+              if: always()
+              timeout-minutes: 1
+              run: rm -rf "$RUNNER_TEMP/codex-review-output"

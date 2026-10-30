@@ -27,11 +27,15 @@ concurrency:
 jobs:
     review:
         name: OpenCode review
+        # CODE_REVIEWS is an organization variable, which a repository variable
+        # of the same name overrides. It lists the reviews to run, separated by
+        # commas with no spaces, such as `claude,codex`.
         if: >-
+            contains(format(',{0},', vars.CODE_REVIEWS), ',opencode,') && (
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'pull_request_target' &&
              github.event.pull_request.head.repo.full_name == github.repository &&
-             !github.event.pull_request.draft)
+             !github.event.pull_request.draft))
         runs-on: [self-hosted, X64]
         timeout-minutes: 80
         permissions:
@@ -84,7 +88,12 @@ jobs:
             - name: Get the review harness
               id: harness
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/opencode-review@11a27f6597454731b1b495f4362700b058399ded
+              uses: solmyrhq/actions/opencode-review@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+
+            - name: Get the review skills
+              id: skills
+              if: steps.prepare.outputs.review == 'true'
+              uses: solmyrhq/actions/skills@f0b74923e5fd000eda7ec565f4b28420af9bebf4
 
             # OpenCode runs the plugins in .opencode before it consults any
             # permission. No permission rule can stop a plugin that the pull
@@ -99,6 +108,7 @@ jobs:
                   BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
                   GUIDE: ${{ inputs.guide }}
                   HARNESS: ${{ steps.harness.outputs.path }}
+                  SKILLS: ${{ steps.skills.outputs.path }}
               run: |
                   guide="$RUNNER_TEMP/guide.md"
                   if ! gh api "repos/$REPOSITORY/contents/$GUIDE?ref=$BASE_SHA" -H "Accept: application/vnd.github.raw" > "$guide" || [ ! -s "$guide" ]; then
@@ -108,8 +118,11 @@ jobs:
                   rm -rf .opencode opencode.json opencode.jsonc AGENTS.md
                   mkdir -p .opencode/agents .opencode/skills
                   cp "$HARNESS/agents/pr-review.md" .opencode/agents/pr-review.md
-                  cp -R "$HARNESS/skills/." .opencode/skills/
+                  cp -R "$SKILLS/exhaustive-review" .opencode/skills/exhaustive-review
+                  # SKILL.md links to ../opencode-tools.md.
+                  cp "$SKILLS/opencode-tools.md" .opencode/skills/opencode-tools.md
                   cp "$guide" .opencode/guide.md
+                  # shellcheck disable=SC2016 # "$schema" is a JSON key.
                   printf '%s\n' '{"$schema":"https://opencode.ai/config.json","instructions":[".opencode/guide.md"]}' > opencode.json
 
             - name: Install OpenCode
@@ -138,6 +151,7 @@ jobs:
               run: |
                   rm -rf review-output
                   mkdir -p review-output
+                  # shellcheck disable=SC2016 # The $variables are GraphQL's, not the shell's.
                   gh api graphql --paginate --slurp \
                       -f owner="${REPOSITORY%/*}" \
                       -f repo="${REPOSITORY#*/}" \
@@ -196,6 +210,7 @@ jobs:
               run: |
                   mkdir -p "$HOME" "$XDG_CONFIG_HOME/opencode" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
                   key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"
+                  # shellcheck disable=SC2016 # "$schema" is a JSON key, and $key is jq's.
                   jq -n --arg key "{file:$key_file}" \
                       '{"$schema": "https://opencode.ai/config.json", update: "disable", snapshots: false, providers: {openrouter: {settings: {apiKey: $key}}}}' \
                       > "$XDG_CONFIG_HOME/opencode/opencode.json"
@@ -217,55 +232,27 @@ jobs:
                       git checkout HEAD -- "$path" 2>/dev/null || true
                   done
 
-            - name: Check the review files
-              id: verify
+            # `opencode run` exits 0 even when the model changes the working
+            # tree.
+            - name: Check that the review changed nothing
+              id: unchanged
               if: steps.prepare.outputs.review == 'true'
-              timeout-minutes: 3
-              env:
-                  HEAD_SHA: ${{ steps.prepare.outputs.head_sha }}
-              # `opencode run` exits 0 even when the model changes the working
-              # tree or writes no summary.
+              timeout-minutes: 1
               run: |
                   if [ -n "$(git status --porcelain --untracked-files=all -- . ':(exclude)review-output')" ]; then
                       echo "The review changed the working tree:" >&2
                       git status --porcelain --untracked-files=all -- . ':(exclude)review-output' >&2
                       exit 1
                   fi
-                  marker="<!-- opencode-code-review:$HEAD_SHA:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT -->"
-                  if [ ! -s review-output/summary.md ]; then
-                      echo "The review wrote no summary." >&2
-                      exit 1
-                  fi
-                  if grep -q '^<!-- opencode-code-review:' review-output/summary.md; then
-                      echo "The summary already carries a marker." >&2
-                      exit 1
-                  fi
-                  { printf '%s\n' "$marker"; cat review-output/summary.md; } > review-output/summary.new
-                  mv review-output/summary.new review-output/summary.md
-                  [ -s review-output/resolve.json ] || printf '{"threads": []}\n' > review-output/resolve.json
-                  if ! jq -e '(.threads | type) == "array" and all(.threads[]; (.id | type) == "string" and (.id | length) > 0 and (.reason | type) == "string" and (.reason | length) > 0)' review-output/resolve.json > /dev/null; then
-                      echo "resolve.json is not a list of thread ids and reasons." >&2
-                      exit 1
-                  fi
-                  for id in $(jq -r '.threads[].id' review-output/resolve.json); do
-                      if ! grep -Fq "$id" review-output/summary.md; then
-                          echo "The summary does not list the thread $id that it asks to resolve." >&2
-                          exit 1
-                      fi
-                  done
-                  for file in review-output/comment-*.json; do
-                      [ -e "$file" ] || continue
-                      if ! jq -e --arg sha "$HEAD_SHA" '(.body | type) == "string" and (.commit_id == $sha) and (.path | type) == "string" and (.line | type) == "number" and (.side == "RIGHT" or .side == "LEFT")' "$file" > /dev/null; then
-                          echo "$file is not a valid inline comment." >&2
-                          exit 1
-                      fi
-                      if jq -e '.body | startswith("<!-- opencode-code-review:")' "$file" > /dev/null; then
-                          echo "$file already carries a marker." >&2
-                          exit 1
-                      fi
-                      jq --arg marker "$marker" '.body = $marker + "\n" + .body' "$file" > "$file.new"
-                      mv "$file.new" "$file"
-                  done
+
+            - name: Check the review
+              id: verify
+              if: steps.prepare.outputs.review == 'true'
+              uses: solmyrhq/actions/review-check@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              with:
+                  directory: review-output
+                  marker: opencode-code-review
+                  head-sha: ${{ steps.prepare.outputs.head_sha }}
 
             - name: Upload the review
               id: upload
@@ -305,101 +292,16 @@ jobs:
                   name: opencode-review-${{ github.run_id }}-${{ github.run_attempt }}
                   path: review-output
 
-            - name: Post the inline comments
-              id: comments
-              timeout-minutes: 5
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ needs.review.outputs.pr_number }}
-                  REPOSITORY: ${{ github.repository }}
-              run: |
-                  for file in review-output/comment-*.json; do
-                      [ -e "$file" ] || continue
-                      if ! gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/comments" --method POST --input "$file"; then
-                          echo "::warning::Could not post $file; adding it to the summary." >&2
-                          {
-                              echo
-                              echo "### Inline comment that could not be posted"
-                              echo
-                              jq -r '.body' "$file"
-                          } >> review-output/summary.md
-                      fi
-                  done
-
-            - name: Post the summary
-              id: summary
-              timeout-minutes: 3
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ needs.review.outputs.pr_number }}
-                  REPOSITORY: ${{ github.repository }}
-              run: gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body-file review-output/summary.md
-
-            - name: Resolve the threads the review addressed
-              id: resolve
-              timeout-minutes: 10
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ needs.review.outputs.pr_number }}
-                  REPOSITORY: ${{ github.repository }}
-              run: |
-                  if [ ! -s review-output/resolve.json ]; then
-                      echo "The review did not nominate any threads." >&2
-                      exit 0
-                  fi
-                  threads=$(jq -c '.threads[]' review-output/resolve.json)
-                  failed=0
-                  while IFS= read -r thread; do
-                      [ -n "$thread" ] || continue
-                      id=$(jq -r '.id' <<< "$thread")
-                      reason=$(jq -r '.reason' <<< "$thread")
-                      row=$(gh api graphql \
-                          -f threadId="$id" \
-                          -f query='
-                  query($threadId: ID!) {
-                    node(id: $threadId) {
-                      ... on PullRequestReviewThread {
-                        isResolved
-                        pullRequest { number }
-                        comments(first: 1) { nodes { author { login } body } }
-                      }
-                    }
-                  }' --jq '[.data.node.isResolved, (.data.node.pullRequest.number // 0), (.data.node.comments.nodes[0].author.login // ""), ((.data.node.comments.nodes[0].body // "") | contains("<!-- opencode-code-review:"))] | @tsv') || row=""
-                      IFS=$'\t' read -r resolved pr_number author opencode_thread <<< "$row" || true
-                      if [ "$resolved" = "true" ]; then
-                          echo "Already resolved $id"
-                          continue
-                      fi
-                      if [ "$resolved" != "false" ] || [ "$pr_number" != "$PR_NUMBER" ] || [ "$author" != "github-actions" ] || [ "$opencode_thread" != "true" ]; then
-                          echo "::warning::Refusing to resolve $id: resolved=$resolved pull-request=$pr_number author=$author opencode-thread=$opencode_thread" >&2
-                          failed=1
-                          continue
-                      fi
-                      gh api graphql \
-                          -f threadId="$id" \
-                          -f query='
-                  mutation($threadId: ID!) {
-                    resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
-                  }' > /dev/null
-                      echo "Resolved $id: $reason"
-                  done <<< "$threads"
-                  exit "$failed"
-
-            - name: Check the summary
-              id: verify
-              timeout-minutes: 3
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ needs.review.outputs.pr_number }}
-                  REPOSITORY: ${{ github.repository }}
-                  HEAD_SHA: ${{ needs.review.outputs.head_sha }}
-              run: |
-                  comments=$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-                      --jq '.[] | select(.user.login == "github-actions[bot]") | .body')
-                  if ! grep -Fq "opencode-code-review:$HEAD_SHA:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" <<< "$comments"; then
-                      echo "No summary comment carries the marker for this run." >&2
-                      exit 1
-                  fi
+            - name: Post the review
+              id: publish
+              timeout-minutes: 25
+              uses: solmyrhq/actions/review-publish@f0b74923e5fd000eda7ec565f4b28420af9bebf4
+              with:
+                  token: ${{ github.token }}
+                  directory: review-output
+                  marker: opencode-code-review
+                  pr: ${{ needs.review.outputs.pr_number }}
+                  head-sha: ${{ needs.review.outputs.head_sha }}
 
             - name: Remove the review files
               id: cleanup
