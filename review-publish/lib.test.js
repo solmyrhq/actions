@@ -43,7 +43,7 @@ function fakeGitHub({ failPosts = [], threads = {}, posted, inline = [], issue =
         throw new Error("HTTP 422");
       }
       const list = route.endsWith("/issues/7/comments") ? issueComments : inlineComments;
-      list.push({ user: { login: "github-actions[bot]" }, body: body.body });
+      list.push({ ...body, user: { login: "github-actions[bot]" } });
       return {};
     },
     async paginate(route) {
@@ -94,14 +94,24 @@ test("inline comments are posted before the summary, in file order", async () =>
 
 test("a re-run posts only what an earlier attempt under the same marker did not", async () => {
   const bot = { login: "github-actions[bot]" };
+  const one = { body: `${MARKER}\none`, path: "a", line: 1, side: "RIGHT" };
+  const two = { body: `${MARKER}\ntwo`, path: "b", line: 2, side: "RIGHT" };
   const github = fakeGitHub({
-    inline: [{ user: bot, body: `${MARKER}\none` }, { user: { login: "pocketarc" }, body: `${MARKER}\ntwo` }],
+    inline: [{ ...one, user: bot }, { ...two, user: { login: "pocketarc" } }],
     issue: [{ user: bot, body: `${MARKER}\nSummary.` }],
   });
-  const directory = scratch({ comments: [{ body: `${MARKER}\none`, path: "a", line: 1 }, { body: `${MARKER}\ntwo`, path: "b", line: 2 }] });
-  assert.deepEqual(await run(github, directory), { failed: false });
+  assert.deepEqual(await run(github, scratch({ comments: [one, two] })), { failed: false });
   const posts = github.calls.filter(([method]) => method === "POST").map(([, route, body]) => [route, body.body]);
   assert.deepEqual(posts, [["/repos/solmyrhq/x/pulls/7/comments", `${MARKER}\ntwo`]]);
+});
+
+test("a re-run still posts a finding whose text an earlier attempt posted on another line", async () => {
+  const first = { body: `${MARKER}\nSame text.`, path: "a", line: 1, side: "RIGHT" };
+  const second = { ...first, line: 9 };
+  const github = fakeGitHub({ inline: [{ ...first, user: { login: "github-actions[bot]" } }] });
+  await run(github, scratch({ comments: [first, second] }));
+  const inlinePosts = github.calls.filter(([method, route]) => method === "POST" && route.endsWith("/pulls/7/comments"));
+  assert.deepEqual(inlinePosts.map(([, , body]) => body.line), [9]);
 });
 
 test("a comment that GitHub rejects is added to the summary without its marker", async () => {
