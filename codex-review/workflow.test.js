@@ -23,8 +23,16 @@ test("only the job that runs no model can write, and it holds neither the proxy 
 test("the review runs only when CODE_REVIEWS lists codex, and never on a fork or a draft", () => {
   const ifText = condition("review");
   assert.ok(ifText.includes("contains(format(',{0},', vars.CODE_REVIEWS), ',codex,')"));
+  assert.match(ifText, /github\.event_name == 'workflow_dispatch'/);
+  assert.match(ifText, /github\.event_name == 'pull_request_target'/);
   assert.match(ifText, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
   assert.match(ifText, /!github\.event\.pull_request\.draft/);
+});
+
+test("a manual run refuses a pull request given as anything but a number", () => {
+  const prepare = review("Check the pull request");
+  assert.ok(prepare.includes("'' | *[!0-9]*)"), "a URL or other text reaches gh pr view");
+  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf("gh pr view"), "the number is checked after gh pr view runs");
 });
 
 test("the proxy key reaches only the step that runs Codex and the step that looks for it in the review", () => {

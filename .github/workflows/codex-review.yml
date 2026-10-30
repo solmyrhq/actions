@@ -75,10 +75,14 @@ jobs:
                   PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
                   REPOSITORY: ${{ github.repository }}
               run: |
-                  if [ -z "$PR_NUMBER" ]; then
-                      echo "No pull request number was supplied." >&2
-                      exit 1
-                  fi
+                  # `gh pr view` also takes a pull request URL, and a URL can
+                  # name a pull request in another repository.
+                  case "$PR_NUMBER" in
+                      '' | *[!0-9]*)
+                          echo "Give the pull request as a number, not '$PR_NUMBER'." >&2
+                          exit 1
+                          ;;
+                  esac
                   pr_json="$RUNNER_TEMP/pr.json"
                   if ! gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,isCrossRepository,baseRefOid,headRefOid > "$pr_json"; then
                       echo "Could not read pull request #$PR_NUMBER." >&2

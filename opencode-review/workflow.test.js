@@ -65,8 +65,16 @@ test("the key file is removed with the rest of OpenCode's state, even after a fa
 });
 
 test("a pull request from a fork or a draft is not reviewed", () => {
+  assert.match(condition("review"), /github\.event_name == 'workflow_dispatch'/);
+  assert.match(condition("review"), /github\.event_name == 'pull_request_target'/);
   assert.match(condition("review"), /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
   assert.match(condition("review"), /!github\.event\.pull_request\.draft/);
+});
+
+test("a manual run refuses a pull request given as anything but a number", () => {
+  const prepare = review("Check the pull request");
+  assert.ok(prepare.includes("'' | *[!0-9]*)"), "a URL or other text reaches gh pr view");
+  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf("gh pr view"), "the number is checked after gh pr view runs");
 });
 
 test("no run script interpolates text that the pull request's author controls", () => {
