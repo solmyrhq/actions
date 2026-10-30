@@ -11,11 +11,15 @@ inputs:
     required: true
   pr:
     description: >-
-      Number of the pull request, as decimal digits. The action refuses a URL,
-      because a URL can identify a pull request in another repository.
+      Number of the pull request, as a positive whole number in decimal
+      digits, such as the value of `github.event.pull_request.number`. The
+      action fails if the value is a URL, because a URL can identify a pull
+      request in another repository.
     required: true
   artifact-prefix:
-    description: First part of the artifact's name, such as `codex-review`.
+    description: >-
+      First part of the artifact's name, as lowercase words joined by hyphens,
+      such as `codex-review`.
     required: true
 
 outputs:

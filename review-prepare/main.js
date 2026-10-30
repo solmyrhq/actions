@@ -1,13 +1,13 @@
 "use strict";
 
-const { input, setOutput, info, run } = require("../toolkit/action.js");
+const { input, setOutput, hyphenatedName, currentRun, info, run } = require("../toolkit/action.js");
 const { runnerClient, pullRequestNumber } = require("../toolkit/github.js");
 const lib = require("./lib.js");
 
 run(async () => {
   const token = input("token");
   const pr = pullRequestNumber(input("pr"));
-  const artifactPrefix = lib.validateArtifactPrefix(input("artifact-prefix"));
+  const artifactPrefix = hyphenatedName("artifact-prefix", input("artifact-prefix"), "codex-review");
   const repository = process.env.GITHUB_REPOSITORY;
 
   const result = await lib.prepare({
@@ -15,8 +15,7 @@ run(async () => {
     repository,
     pr,
     artifactPrefix,
-    runId: process.env.GITHUB_RUN_ID ?? "",
-    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "",
+    run: currentRun(),
   });
   if (!result.review) {
     info(`Pull request #${pr} is not reviewed: ${result.reason}.`);

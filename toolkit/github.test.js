@@ -30,10 +30,38 @@ test("a GET returns the parsed body, and a failed one names the route and the st
   await assert.rejects(make(async () => respond("Not Found", { status: 404 })).get("/repos/o/r/pulls/7"), /GET https:\/\/api\.test\/repos\/o\/r\/pulls\/7 failed: HTTP 404/);
 });
 
-test("a pull request number is decimal digits, and anything else is refused", () => {
+test("a pull request number is a positive whole number in decimal digits, and anything else is refused", () => {
   assert.equal(github.pullRequestNumber("11"), 11);
   assert.equal(github.pullRequestNumber(" 7 "), 7);
-  for (const bad of ["", "0", "07", "-1", "1.5", "https://github.com/solmyrhq/actions/pull/11", "11 #", undefined]) {
+  assert.equal(github.pullRequestNumber("07"), 7);
+  for (const bad of ["", "0", "00", "-1", "1.5", "1e3", "0x1f", "9007199254740993", "https://github.com/solmyrhq/actions/pull/11", "11 #", undefined]) {
     assert.throws(() => github.pullRequestNumber(bad), /as a number/, String(bad));
   }
+});
+
+test("the runner's client calls the job's GitHub instance, or github.com when the job names none", async () => {
+  const saved = { api: process.env.GITHUB_API_URL, graphql: process.env.GITHUB_GRAPHQL_URL };
+  const restore = (name, value) => {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  };
+  const urls = [];
+  const fetch = async (url) => {
+    urls.push(url);
+    return respond({ data: {} });
+  };
+  try {
+    process.env.GITHUB_API_URL = "https://ghe.test/api/v3";
+    process.env.GITHUB_GRAPHQL_URL = "https://ghe.test/api/graphql";
+    await github.runnerClient("t", fetch).get("/r");
+    await github.runnerClient("t", fetch).graphql("query { x }", {});
+    delete process.env.GITHUB_API_URL;
+    delete process.env.GITHUB_GRAPHQL_URL;
+    await github.runnerClient("t", fetch).get("/r");
+    await github.runnerClient("t", fetch).graphql("query { x }", {});
+  } finally {
+    restore("GITHUB_API_URL", saved.api);
+    restore("GITHUB_GRAPHQL_URL", saved.graphql);
+  }
+  assert.deepEqual(urls, ["https://ghe.test/api/v3/r", "https://ghe.test/api/graphql", "https://api.github.com/r", "https://api.github.com/graphql"]);
 });

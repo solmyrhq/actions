@@ -1,12 +1,5 @@
 "use strict";
 
-function validateArtifactPrefix(prefix) {
-  if (!/^[a-z][a-z-]*[a-z]$/.test(prefix)) {
-    throw new Error(`artifact-prefix must be lowercase words joined by hyphens, such as 'codex-review': ${JSON.stringify(prefix)}`);
-  }
-  return prefix;
-}
-
 // Returns why the job must not review the pull request, or undefined if it must.
 function skipReason(pull, repository) {
   if (pull.state !== "open") return "it is closed";
@@ -18,8 +11,9 @@ function skipReason(pull, repository) {
 
 // Returns `{ review: false, reason }` if the job must not review pull request
 // `pr`. Otherwise returns `review: true` with the commits and the artifact name
-// for the job's later steps and the publish job.
-async function prepare({ github, repository, pr, artifactPrefix, runId, runAttempt }) {
+// for the job's later steps and the publish job. `run` comes from
+// `currentRun()`.
+async function prepare({ github, repository, pr, artifactPrefix, run }) {
   const pull = await github.get(`/repos/${repository}/pulls/${pr}`);
   const reason = skipReason(pull, repository);
   if (reason !== undefined) {
@@ -33,8 +27,8 @@ async function prepare({ github, repository, pr, artifactPrefix, runId, runAttem
     // The publish job must read this name from the review job's outputs: a
     // re-run of only the publish job has a higher run attempt than the attempt
     // that uploaded the artifact.
-    artifact: `${validateArtifactPrefix(artifactPrefix)}-${runId}-${runAttempt}`,
+    artifact: `${artifactPrefix}-${run.id}-${run.attempt}`,
   };
 }
 
-module.exports = { validateArtifactPrefix, skipReason, prepare };
+module.exports = { skipReason, prepare };

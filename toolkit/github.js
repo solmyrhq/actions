@@ -59,15 +59,16 @@ function client({ token, apiUrl, graphqlUrl, fetch }) {
   };
 }
 
-// Returns `value` as a pull request number, or throws if it is not decimal
-// digits. `gh` also accepts a URL, which can identify a pull request in another
-// repository.
+// Returns `value` as a pull request number. Throws unless `value` is a positive
+// whole number in decimal digits. Unlike `gh`, it throws on a URL, because a
+// URL can name a pull request in another repository.
 function pullRequestNumber(value) {
   const text = String(value ?? "").trim();
-  if (!/^[1-9]\d*$/.test(text)) {
+  const number = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(number) || number === 0) {
     throw new Error(`Give the pull request as a number, not ${JSON.stringify(text)}.`);
   }
-  return Number(text);
+  return number;
 }
 
 // Returns a client for the GitHub instance that the job runs on.

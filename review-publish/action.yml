@@ -21,7 +21,10 @@ inputs:
     description: Name of the review's marker, such as `codex-code-review`.
     required: true
   pr:
-    description: Number of the pull request.
+    description: >-
+      Number of the pull request, as a positive whole number in decimal
+      digits. The action fails if the value is a URL, because a URL can
+      identify a pull request in another repository.
     required: true
   head-sha:
     description: The pull request's head commit that the review covers.

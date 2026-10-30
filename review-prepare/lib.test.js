@@ -23,7 +23,7 @@ const github = (body) => ({
   },
 });
 
-const run = (gh) => lib.prepare({ github: gh, repository: REPOSITORY, pr: 7, artifactPrefix: "codex-review", runId: "42", runAttempt: "2" });
+const run = (gh) => lib.prepare({ github: gh, repository: REPOSITORY, pr: 7, artifactPrefix: "codex-review", run: { id: "42", attempt: "2" } });
 
 test("an open pull request from this repository is reviewed, with its commits and an artifact named after this run", async () => {
   const gh = github(pull());
@@ -47,11 +47,4 @@ test("a closed pull request, a draft, a fork and a deleted fork are not reviewed
     assert.deepEqual(await run(github(body)), { review: false, reason }, reason);
   }
   assert.deepEqual(await run(github(pull({ head: { sha: "a".repeat(40), repo: null } }))), { review: false, reason: "it is from a fork" });
-});
-
-test("an artifact prefix that is not lowercase words joined by hyphens is refused", () => {
-  assert.equal(lib.validateArtifactPrefix("opencode-review"), "opencode-review");
-  for (const bad of ["Codex", "codex_review", "-codex", "codex-", "codex review", ""]) {
-    assert.throws(() => lib.validateArtifactPrefix(bad), /artifact-prefix/, bad);
-  }
 });

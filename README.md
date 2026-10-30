@@ -135,13 +135,22 @@ The files in `skills/` are copies of these files in the agent-config repository:
 
 ## review-prepare
 
-The review job runs this action first. The action reads the pull request through the REST API, and then sets the `review` output. If the pull request is closed, is a draft, or is from a fork, `review` is `false`, and the job must not review the pull request. A pull request from a fork that was deleted is also from a fork. If `review` is `true`, the action also sets these outputs:
+Run this action as the first step of a review job. The action reads the pull request through the REST API, and then sets the `review` output. If the pull request is closed, is a draft, or is from a fork, `review` is `false`, and the job must not review the pull request. A pull request from a fork that was deleted is also from a fork. If `review` is `true`, the action also sets these outputs:
 
 - `pr-number`: the number of the pull request.
 - `head-sha` and `base-sha`: the head commit and the base commit of the pull request.
 - `artifact`: the name of the artifact for the review, `<artifact-prefix>-<run id>-<run attempt>`. The review job uploads the files of the review in this artifact, and the publish job downloads them.
 
-The `pr` input must be decimal digits. The action refuses a URL, because a URL can identify a pull request in another repository.
+The `pr` input is required. It must be a positive whole number in decimal digits. If `pr` is a URL, the action fails, because a URL can identify a pull request in another repository. If a pull request event and a manual dispatch can both start the workflow, give the number from the pull request event. If a manual dispatch started the workflow, give the `pr` input of the dispatch. Write `pr` as in this example:
+
+```yaml
+- id: prepare
+  uses: solmyrhq/actions/review-prepare@<commit sha>
+  with:
+      token: ${{ github.token }}
+      pr: ${{ github.event.pull_request.number || inputs.pr }}
+      artifact-prefix: codex-review
+```
 
 Give `artifact` to the publish job through an output of the review job. Do not make the name again in the publish job. If you re-run only the publish job, its run attempt is higher than the run attempt of the review job that uploaded the artifact. Thus, a name that the publish job makes from its own run attempt is not the name of the artifact.
 
