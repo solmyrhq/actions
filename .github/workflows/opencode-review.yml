@@ -228,7 +228,7 @@ jobs:
 
             - name: Restore the reviewed files
               id: restore
-              if: steps.prepare.outputs.review == 'true'
+              if: always() && steps.prepare.outputs.review == 'true'
               timeout-minutes: 1
               run: |
                   for path in .opencode opencode.json opencode.jsonc AGENTS.md; do

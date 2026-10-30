@@ -284,7 +284,7 @@ jobs:
 
             - name: Restore the pull request's agent files
               id: restore
-              if: steps.prepare.outputs.review == 'true'
+              if: always() && steps.prepare.outputs.review == 'true'
               timeout-minutes: 1
               run: |
                   for path in .agents .codex AGENTS.md AGENTS.override.md; do

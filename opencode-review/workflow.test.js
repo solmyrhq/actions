@@ -85,6 +85,11 @@ test("the pull request's OpenCode files are replaced for the run and restored af
   const replaced = ".opencode opencode.json opencode.jsonc AGENTS.md";
   assert.ok(TEXT.includes(`rm -rf ${replaced}`));
   assert.ok(TEXT.includes(`for path in ${replaced}; do`));
+  assert.match(
+    review("Restore the reviewed files"),
+    /\n {14}if: always\(\) && steps\.prepare\.outputs\.review == 'true'\n/,
+    "the files are not restored after a failed review",
+  );
 });
 
 test("the skills come from the skills action, with the tool mappings that SKILL.md links to", () => {

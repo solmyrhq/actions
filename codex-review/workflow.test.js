@@ -65,7 +65,9 @@ test("only the Codex process is given the tailnet proxy", () => {
 test("the pull request's agent files are removed for the run and restored from the head commit after it", () => {
   const paths = ".agents .codex AGENTS.md AGENTS.override.md";
   assert.ok(review("Remove the pull request's agent files for the run").includes(`for path in ${paths}; do`));
-  assert.ok(review("Restore the pull request's agent files").includes(`for path in ${paths}; do`));
+  const restore = review("Restore the pull request's agent files");
+  assert.ok(restore.includes(`for path in ${paths}; do`));
+  assert.match(restore, /\n {14}if: always\(\) && steps\.prepare\.outputs\.review == 'true'\n/, "the files are not restored after a failed review");
 });
 
 test("the sandbox is checked before the model starts, outside the pull request's checkout", () => {
