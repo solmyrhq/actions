@@ -117,7 +117,7 @@ jobs:
               if: steps.prepare.outputs.review == 'true'
               uses: solmyrhq/actions/skills@979ffa1c5c4818caf082fb0c2b13b689928df8e8
 
-            # The model has no network and no GitHub token.
+            # The model's commands cannot connect to the network.
             - name: Read the pull request
               id: context
               if: steps.prepare.outputs.review == 'true'

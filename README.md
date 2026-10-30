@@ -135,7 +135,7 @@ jobs:
 
 Use the `model`, `effort` and `base-url` inputs to set the model, its reasoning effort and the CLIProxyAPI endpoint. The defaults are `gpt-6.1-sol`, `xhigh` and the CLIProxyAPI endpoint on linux-bruno.
 
-The model has no network and no GitHub token. Before Codex starts, the `review` job does these steps:
+The commands that the model runs cannot connect to the network, and they have no GitHub token. Only the Codex process can connect to the model provider, CLIProxyAPI. The Codex process connects through the tailnet proxy and uses the CLIProxyAPI key. Before Codex starts, the `review` job does these steps:
 
 1. It reads the pull request, its diff, its files, its comments, its reviews and its review threads, and the guide from the base commit, into a directory outside the checkout.
 2. It installs Codex from a release whose checksum is pinned, and checks that the Codex sandbox works on the runner.
