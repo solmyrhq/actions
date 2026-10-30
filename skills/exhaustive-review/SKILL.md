@@ -29,7 +29,7 @@ This is the only review round this change will get, so the report must be a comp
 
 ## In CI
 
-You are running in CI only when the caller tells you so in the prompt. Don't decide it from the environment. If the caller tells you that you are running in CI, read [references/ci.md](references/ci.md) and follow it. That file contains every instruction for CI. If the caller tells you that you are running in CI in OpenCode, read [references/ci-opencode.md](references/ci-opencode.md) instead. It describes that harness and its GitHub access.
+You are running in CI only when the caller tells you so in the prompt. Don't decide it from the environment. If the caller tells you that you are running in CI, read [references/ci.md](references/ci.md) and follow it. That file contains every instruction for CI. If the caller tells you that you are running in CI in OpenCode, read [references/ci-opencode.md](references/ci-opencode.md) instead. It describes that harness and its GitHub access. If the caller tells you that you are running in CI in Codex, read [references/ci-codex.md](references/ci-codex.md) instead. That file contains the instructions for that harness and the list of files that the harness gives you.
 
 ## Review lenses
 

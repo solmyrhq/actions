@@ -1,0 +1,33 @@
+name: Check a review
+description: >-
+  Checks the summary, inline comments and threads to resolve that a model wrote
+  for a pull request review, and adds this run's marker to the summary and to
+  each inline comment. Fails if any file is missing or malformed.
+
+inputs:
+  directory:
+    description: >-
+      Directory that holds summary.md, resolve.json and comment-*.json. When
+      `structured-review` is set, it must be empty.
+    required: true
+  marker:
+    description: Name of the review's marker, such as `codex-code-review`.
+    required: true
+  head-sha:
+    description: The pull request's head commit, which every inline comment must name.
+    required: true
+  structured-review:
+    description: >-
+      Path of a review in one JSON object with `comments`, `summary` and
+      `resolve`, as codex-review/output-schema.json describes. When set, the
+      action first writes it to `directory` as the files above.
+    required: false
+    default: ""
+
+outputs:
+  marker:
+    description: This run's marker, `<!-- <marker>:<head-sha>:<run id>:<run attempt> -->`.
+
+runs:
+  using: node24
+  main: main.js

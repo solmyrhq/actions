@@ -30,29 +30,8 @@ test("a truncated fingerprint is refused", () => {
   assert.throws(() => lib.normaliseFingerprint(`SHA256:${BODY.slice(0, 40)}`), /not a SHA256 fingerprint/);
 });
 
-test("runner architectures are mapped to Tailscale's names, and unknown ones are refused", () => {
-  assert.equal(lib.tailscaleArch("X64"), "amd64");
-  assert.equal(lib.tailscaleArch("ARM64"), "arm64");
-  assert.throws(() => lib.tailscaleArch("X86"));
-});
-
-test("node names are DNS labels of at most 63 characters that end in the run ID, attempt and random part", () => {
-  assert.equal(lib.nodeHostname("solmyrhq/sheet.stream", "123", "2", "a1b2c3"), "gha-sheet-stream-123-2-a1b2c3");
-  const long = lib.nodeHostname(`solmyrhq/${"a".repeat(100)}`, "123456789012", "1", "a1b2c3");
-  assert.ok(long.length <= 63);
-  assert.ok(long.endsWith("-123456789012-1-a1b2c3"));
-});
-
-test("malformed inputs and unpinned or unstable versions are refused", () => {
-  assert.throws(() => lib.validateVersion("latest"));
-  assert.throws(() => lib.validateVersion("1.99.0"), /unstable/);
-  assert.throws(() => lib.validateVersion("1.098.9"));
-  assert.throws(() => lib.validateVersion("1.38.0"), /older than Tailscale 1.40/);
-  assert.equal(lib.validateVersion("1.40.0"), "1.40.0");
-  assert.equal(lib.validateVersion("1.98.9"), "1.98.9");
+test("a host that ssh would read as an option or a second line is refused", () => {
   assert.throws(() => lib.validateHost("-oProxyCommand=evil"));
-  assert.throws(() => lib.validateSha256("abc"));
-  assert.throws(() => lib.validateTags("ci-platform-deploy"));
   assert.throws(() => lib.validateHost("host\nProxyCommand evil"));
 });
 

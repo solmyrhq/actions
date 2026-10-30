@@ -96,12 +96,19 @@ comments, and checks that the summary comment exists with this run's marker.
 
 ## Nominate the threads that are fully addressed
 
-Examine each unresolved thread in `threads.json`. Nominate it only if its first
-comment was posted by this workflow's bot (`github-actions` in GraphQL;
-`github-actions[bot]` in REST) and its finding is fully addressed. Do not
-nominate a thread whose `isResolved` is true. Do not nominate a thread whose
-first comment is from a person, from Claude (`claude` in GraphQL; `claude[bot]`
-in REST), or from another bot.
+Examine each unresolved thread in `threads.json`. Nominate a thread only if all
+of these are true:
+
+- This workflow's bot posted its first comment (`github-actions` in GraphQL;
+  `github-actions[bot]` in REST).
+- That comment starts with `<!-- opencode-code-review:`.
+- Its finding is fully addressed.
+
+Other reviews, such as the Codex review, also post as `github-actions`, but
+their comments start with a different marker. Do not nominate a thread whose
+`isResolved` is true. Do not nominate a thread whose first comment is from a
+person, from Claude (`claude` in GraphQL; `claude[bot]` in REST), or from
+another bot.
 
 A thread is fully addressed when its finding is fixed at the head commit, or
 when a person has said the change will not be made. The thread being resolved

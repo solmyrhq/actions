@@ -64,19 +64,6 @@ test("the agent reads the guide that the workflow installs", () => {
   assert.match(AGENT, /`\.opencode\/guide\.md`/);
 });
 
-test("every relative link in the skill points at a file in the harness", () => {
-  const skill = path.join(HERE, "skills/exhaustive-review");
-  const files = ["SKILL.md", "references/ci.md", "references/ci-opencode.md"];
-  for (const file of files) {
-    const text = fs.readFileSync(path.join(skill, file), "utf8");
-    for (const [, target] of text.matchAll(/\]\((\.\.?\/[^)#\s]+)/g)) {
-      if (target.includes("codex-tools.md")) continue;
-      const resolved = path.resolve(path.dirname(path.join(skill, file)), target);
-      assert.ok(fs.existsSync(resolved), `${file} links to ${target}, which the harness does not hold`);
-    }
-  }
-});
-
 test("the prompt tells the model to load the skill", () => {
   const prompt = fs.readFileSync(path.join(HERE, "prompt.md"), "utf8");
   assert.match(prompt, /`exhaustive-review` skill/);

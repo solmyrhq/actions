@@ -1,0 +1,22 @@
+name: Review skills
+description: >-
+    The exhaustive-review skill and the tool mappings that the skill links to.
+    The Claude, Codex and OpenCode reviews load these files.
+
+outputs:
+    path:
+        description: The directory that holds exhaustive-review/, codex-tools.md and opencode-tools.md.
+        value: ${{ steps.locate.outputs.path }}
+
+runs:
+    using: composite
+    steps:
+        # When an output's value is `${{ github.action_path }}`, callers
+        # receive an empty string.
+        - id: locate
+          shell: bash
+          run: |
+              for file in exhaustive-review/SKILL.md exhaustive-review/references/ci.md exhaustive-review/references/ci-opencode.md exhaustive-review/references/ci-codex.md codex-tools.md opencode-tools.md; do
+                  test -s "$GITHUB_ACTION_PATH/$file"
+              done
+              echo "path=$GITHUB_ACTION_PATH" >> "$GITHUB_OUTPUT"
