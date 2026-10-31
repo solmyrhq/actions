@@ -1,0 +1,71 @@
+"use strict";
+
+// The Claude review has no harness action. This directory holds only the tests
+// of .github/workflows/claude-review.yml.
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const { test } = require("node:test");
+const { WORKFLOWS, workflow } = require("../test-support/workflow.js");
+
+const { text: TEXT, step, permissions, condition } = workflow("claude-review.yml");
+const review = (name) => step("review", name);
+
+test("the workflow grants no permission at the top level", () => {
+  assert.match(TEXT, /\npermissions: \{\}\n/);
+});
+
+test("the job reads, and writes only through the Claude GitHub App's token", () => {
+  assert.deepEqual(permissions("review"), { contents: "read", "id-token": "write", actions: "read" });
+});
+
+test("the review runs only when CODE_REVIEWS lists claude, on a pull request from this repository that is not a draft", () => {
+  const ifText = condition("review");
+  assert.ok(ifText.includes("contains(format(',{0},', vars.CODE_REVIEWS), ',claude,')"));
+  assert.match(ifText, /github\.event_name == 'pull_request_target'/);
+  assert.match(ifText, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(ifText, /!github\.event\.pull_request\.draft/);
+});
+
+test("the skill reaches Claude through a temporary configuration directory, not the checkout", () => {
+  assert.ok(review("Set up Claude's configuration").includes('cp -R "$SKILLS/exhaustive-review" "$config/skills/exhaustive-review"'));
+  assert.match(review("Review the pull request"), /CLAUDE_CONFIG_DIR: \$\{\{ steps\.config\.outputs\.path \}\}/);
+  const cleanup = review("Remove Claude's configuration");
+  assert.match(cleanup, /\n {14}if: always\(\)\n/);
+});
+
+test("the checkout keeps no credentials, and the app token is removed from it even after a failure", () => {
+  assert.match(review("Check out the pull request"), /persist-credentials: false/);
+  assert.match(review("Remove the app token from the checkout"), /if: always\(\)/);
+});
+
+test("Claude may run only read commands and the comment tools", () => {
+  const run = review("Review the pull request");
+  assert.doesNotMatch(run, /"Bash\((?!gh pr view|gh pr diff|gh pr comment|gh api )/);
+  assert.doesNotMatch(run, /"(Edit|Write|NotebookEdit|WebFetch|WebSearch)"/);
+});
+
+test("no expression interpolates text that the pull request's author controls", () => {
+  for (const field of ["title", "body", "head.ref", "head.label"]) {
+    assert.ok(!TEXT.includes(`github.event.pull_request.${field}`), `the workflow reads pull_request.${field}`);
+  }
+});
+
+test("every action is pinned to a full commit SHA", () => {
+  const refs = [...TEXT.matchAll(/uses: (\S+)/g)].map((match) => match[1]);
+  assert.ok(refs.length > 0);
+  for (const ref of refs) assert.match(ref, /@[0-9a-f]{40}$/, `${ref} is not pinned to a commit`);
+});
+
+test("this repository reviews itself with each shared review on pull_request_target", () => {
+  for (const [caller, called] of [
+    ["claude-code-review.yml", "claude-review.yml"],
+    ["codex-code-review.yml", "codex-review.yml"],
+    ["opencode-code-review.yml", "opencode-review.yml"],
+  ]) {
+    const text = fs.readFileSync(path.join(WORKFLOWS, caller), "utf8");
+    assert.match(text, /\n {4}pull_request_target:\n/, `${caller} does not run on pull_request_target`);
+    assert.ok(text.includes(`uses: ./.github/workflows/${called}\n`), `${caller} does not call ${called}`);
+  }
+});

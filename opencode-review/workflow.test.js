@@ -1,101 +1,80 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
+const { workflow } = require("../test-support/workflow.js");
 
-const WORKFLOWS = path.join(__dirname, "../.github/workflows");
-const TEXT = fs.readFileSync(path.join(WORKFLOWS, "opencode-review.yml"), "utf8");
-
-// Returns the text from a job's key to the next job's key, so that an
-// assertion matches only that job.
-function job(name) {
-  const start = TEXT.indexOf(`\n    ${name}:\n`);
-  assert.notEqual(start, -1, `no ${name} job`);
-  const rest = TEXT.slice(start + 1);
-  const next = rest.slice(1).search(/\n {4}[a-z-]+:\n/);
-  return next === -1 ? rest : rest.slice(0, next + 1);
-}
-
-function permissions(jobText) {
-  const block = /\n {8}permissions:\n((?: {12}.+\n)+)/.exec(jobText);
-  assert.ok(block, "the job sets no permissions");
-  return Object.fromEntries(
-    block[1].trim().split("\n").map((line) => {
-      const [key, value] = line.replace(/#.*/, "").trim().split(/:\s*/);
-      return [key, value];
-    }),
-  );
-}
+const { text: TEXT, job, step, permissions, condition } = workflow("opencode-review.yml");
+const review = (name) => step("review", name);
 
 test("the workflow grants no permission at the top level", () => {
   assert.match(TEXT, /\npermissions: \{\}\n/);
 });
 
 test("the job that runs the model cannot write", () => {
-  assert.deepEqual(permissions(job("review")), { contents: "read", "pull-requests": "read" });
+  assert.deepEqual(permissions("review"), { contents: "read", "pull-requests": "read" });
 });
 
 test("only the job that runs no model can write", () => {
-  assert.deepEqual(permissions(job("publish")), { contents: "write", "pull-requests": "write" });
-  assert.doesNotMatch(job("publish"), /opencode" run|OPENROUTER_API_KEY/);
+  assert.deepEqual(permissions("publish"), { contents: "write", "pull-requests": "write" });
+  assert.doesNotMatch(workflow("opencode-review.yml").job("publish"), /opencode" run|OPENROUTER_API_KEY/);
 });
 
-// Returns the text of one step of the review job, from its `- name:` line up to the next step's.
-function step(name) {
-  const text = job("review");
-  const start = text.indexOf(`- name: ${name}\n`);
-  assert.notEqual(start, -1, `no step named ${name}`);
-  const next = text.indexOf("\n            - name: ", start + 1);
-  return next === -1 ? text.slice(start) : text.slice(start, next);
-}
+test("the review runs only when CODE_REVIEWS lists opencode", () => {
+  assert.ok(condition("review").includes("contains(format(',{0},', vars.CODE_REVIEWS), ',opencode,')"));
+});
 
 test("the OpenRouter key reaches only the step that writes it to a file", () => {
   const uses = TEXT.match(/secrets\.OPENROUTER_API_KEY/g) ?? [];
   assert.equal(uses.length, 1);
-  assert.match(step("Write the OpenRouter key"), /secrets\.OPENROUTER_API_KEY/);
+  assert.match(review("Write the OpenRouter key"), /secrets\.OPENROUTER_API_KEY/);
 });
 
 test("the step that runs the model has no OpenRouter key in its environment", () => {
-  const review = step("Review the pull request");
-  assert.match(review, /opencode" run/);
-  assert.doesNotMatch(review, /OPENROUTER_API_KEY/);
-  assert.ok(review.includes('"{file:$key_file}"'), "OpenCode does not read the key from the file");
+  const run = review("Review the pull request");
+  assert.match(run, /opencode" run/);
+  assert.doesNotMatch(run, /OPENROUTER_API_KEY/);
+  assert.ok(run.includes('"{file:$key_file}"'), "OpenCode does not read the key from the file");
 });
 
 test("the key sits where OpenCode V2 reads a provider's API key", () => {
   // The V1 `provider.<id>.options` shape is deprecated in OpenCode's config schema.
-  const review = step("Review the pull request");
-  assert.match(review, /providers: \{openrouter: \{settings: \{apiKey: \$key\}\}\}/);
-  assert.doesNotMatch(review, /\bprovider: \{/);
+  const run = review("Review the pull request");
+  assert.match(run, /providers: \{openrouter: \{settings: \{apiKey: \$key\}\}\}/);
+  assert.doesNotMatch(run, /\bprovider: \{/);
 });
 
 test("the key is written outside the checkout", () => {
   assert.ok(
-    step("Write the OpenRouter key").includes('> "$RUNNER_TEMP/opencode-secrets/openrouter-key"'),
+    review("Write the OpenRouter key").includes('> "$RUNNER_TEMP/opencode-secrets/openrouter-key"'),
     "the key file is not under $RUNNER_TEMP/opencode-secrets",
   );
-  assert.ok(step("Review the pull request").includes('key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"'));
+  assert.ok(review("Review the pull request").includes('key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"'));
 });
 
 test("OpenCode skips the pull request's .claude, .agents and CLAUDE.md", () => {
-  const review = step("Review the pull request");
-  assert.match(review, /OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"/);
-  assert.match(review, /OPENCODE_DISABLE_CLAUDE_CODE: "1"/);
+  const run = review("Review the pull request");
+  assert.match(run, /OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"/);
+  assert.match(run, /OPENCODE_DISABLE_CLAUDE_CODE: "1"/);
 });
 
 test("the key file is removed with the rest of OpenCode's state, even after a failure", () => {
-  const cleanup = step("Remove OpenCode and its state");
+  const cleanup = review("Remove OpenCode and its state");
   assert.match(cleanup, /\n {14}if: always\(\)\n/);
   assert.match(cleanup, /"\$RUNNER_TEMP\/opencode-secrets"/);
 });
 
 test("a pull request from a fork or a draft is not reviewed", () => {
-  const condition = /\n {8}if: >-\n((?: {12}.+\n)+)/.exec(job("review"));
-  assert.ok(condition);
-  assert.match(condition[1], /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(condition[1], /!github\.event\.pull_request\.draft/);
+  assert.match(condition("review"), /github\.event_name == 'workflow_dispatch'/);
+  assert.match(condition("review"), /github\.event_name == 'pull_request_target'/);
+  assert.match(condition("review"), /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(condition("review"), /!github\.event\.pull_request\.draft/);
+});
+
+test("a manual run refuses a pull request given as anything but a number", () => {
+  const prepare = review("Check the pull request");
+  assert.ok(prepare.includes("'' | *[!0-9]*)"), "a URL or other text reaches gh pr view");
+  assert.ok(prepare.indexOf("*[!0-9]*") < prepare.indexOf('gh pr view "$PR_NUMBER"'), "the number is checked after gh pr view runs");
 });
 
 test("no run script interpolates text that the pull request's author controls", () => {
@@ -114,14 +93,36 @@ test("the pull request's OpenCode files are replaced for the run and restored af
   const replaced = ".opencode opencode.json opencode.jsonc AGENTS.md";
   assert.ok(TEXT.includes(`rm -rf ${replaced}`));
   assert.ok(TEXT.includes(`for path in ${replaced}; do`));
+  assert.match(
+    review("Restore the reviewed files"),
+    /\n {14}if: always\(\) && steps\.prepare\.outputs\.review == 'true'\n/,
+    "the files are not restored after a failed review",
+  );
+});
+
+test("the skills come from the skills action, with the tool mappings that SKILL.md links to", () => {
+  assert.match(review("Get the review skills"), /uses: solmyrhq\/actions\/skills@/);
+  const install = review("Install the harness");
+  assert.ok(install.includes('cp -R "$SKILLS/exhaustive-review" .opencode/skills/exhaustive-review'));
+  assert.ok(install.includes('cp "$SKILLS/opencode-tools.md" .opencode/skills/opencode-tools.md'));
 });
 
 test("the guide is read from the base commit, not from the pull request", () => {
   assert.match(TEXT, /contents\/\$GUIDE\?ref=\$BASE_SHA/);
 });
 
-test("this repository's own caller reviews with the shared workflow", () => {
-  const caller = fs.readFileSync(path.join(WORKFLOWS, "opencode-code-review.yml"), "utf8");
-  assert.match(caller, /\n {4}pull_request_target:\n/);
-  assert.match(caller, /uses: \.\/\.github\/workflows\/opencode-review\.yml\n/);
+test("the publish job downloads the artifact by the name the review job uploaded, so a re-run of only the publish job finds it", () => {
+  assert.match(job("review"), /\n {12}artifact: \$\{\{ steps\.prepare\.outputs\.artifact \}\}\n/);
+  assert.match(review("Upload the review"), /name: \$\{\{ steps\.prepare\.outputs\.artifact \}\}\n/);
+  assert.match(step("publish", "Download the review"), /name: \$\{\{ needs\.review\.outputs\.artifact \}\}\n/);
+  assert.doesNotMatch(job("publish"), /run_attempt/);
+});
+
+test("the review is checked and posted by the shared actions under the OpenCode marker", () => {
+  const check = review("Check the review");
+  assert.match(check, /uses: solmyrhq\/actions\/review-check@/);
+  assert.match(check, /marker: opencode-code-review\n/);
+  const post = step("publish", "Post the review");
+  assert.match(post, /uses: solmyrhq\/actions\/review-publish@/);
+  assert.match(post, /marker: opencode-code-review\n/);
 });
