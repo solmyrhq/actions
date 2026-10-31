@@ -1,7 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
-const { input, setOutput, run } = require("../toolkit/action.js");
+const { input, setOutput, currentRun, run } = require("../toolkit/action.js");
 const lib = require("./lib.js");
 
 run(async () => {
@@ -20,7 +20,7 @@ run(async () => {
     lib.writeStructured(directory, review, headSha);
   }
 
-  const marker = lib.runMarker(markerName, headSha, process.env.GITHUB_RUN_ID ?? "", process.env.GITHUB_RUN_ATTEMPT ?? "");
+  const marker = lib.runMarker(markerName, headSha, currentRun());
   const comments = lib.check(directory, markerName, marker, headSha);
   setOutput("marker", marker);
   console.log(`The review has a summary and ${comments} inline comment(s), all marked ${marker}.`);

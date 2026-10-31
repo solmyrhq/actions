@@ -155,23 +155,3 @@ test("the run fails when no posted summary starts with this run's marker", async
   const impostor = fakeGitHub({ posted: [{ user: { login: "someone" }, body: `${MARKER}\nx` }] });
   await assert.rejects(run(impostor, scratch()), /No summary comment/);
 });
-
-test("the client follows the next link until the last page", async () => {
-  const pages = {
-    "https://api.test/r?per_page=100": { link: '<https://api.test/r?page=2>; rel="next", <https://api.test/r?page=2>; rel="last"', body: [1, 2] },
-    "https://api.test/r?page=2": { link: '<https://api.test/r?per_page=100>; rel="first"', body: [3] },
-  };
-  const fetch = async (url) => ({
-    ok: true,
-    headers: new Headers({ link: pages[url].link }),
-    text: async () => JSON.stringify(pages[url].body),
-  });
-  const github = lib.client({ token: "t", apiUrl: "https://api.test", graphqlUrl: "https://api.test/graphql", fetch });
-  assert.deepEqual(await github.paginate("/r"), [1, 2, 3]);
-});
-
-test("a GraphQL error in a 200 response is raised", async () => {
-  const fetch = async () => ({ ok: true, headers: new Headers(), text: async () => JSON.stringify({ errors: [{ message: "nope" }] }) });
-  const github = lib.client({ token: "t", apiUrl: "https://api.test", graphqlUrl: "https://api.test/graphql", fetch });
-  await assert.rejects(github.graphql("query { x }", {}), /GraphQL error: nope/);
-});

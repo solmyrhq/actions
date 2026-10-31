@@ -213,6 +213,29 @@ This action holds the `exhaustive-review` skill and the tool mappings that the s
 
 The files in `skills/` are copies of these files in the agent-config repository: `skills/exhaustive-review/`, `skills/codex-tools.md` and `skills/opencode-tools.md`. Every file in `skills/exhaustive-review/` is a copy, including the CI references `references/ci-opencode.md` and `references/ci-codex.md`. To change a file, change it in agent-config first. Then copy the changed file here.
 
+## review-prepare
+
+Run this action as the first step of a review job. The action reads the pull request through the REST API, and then sets the `review` output. If the pull request is closed, is a draft, or is from a fork, `review` is `false`, and the job must not review the pull request. A pull request from a fork that was deleted is also from a fork. If `review` is `true`, the action also sets these outputs:
+
+- `pr-number`: the number of the pull request.
+- `head-sha` and `base-sha`: the head commit and the base commit of the pull request.
+- `artifact`: the name of the artifact for the review, `<artifact-prefix>-<run id>-<run attempt>`. The review job uploads the files of the review in this artifact, and the publish job downloads them.
+
+The `pr` input is required. It must be a positive whole number in decimal digits. If `pr` is a URL, the action fails, because a URL can identify a pull request in another repository. If a pull request event and a manual dispatch can both start the workflow, give the number from the pull request event. If a manual dispatch started the workflow, give the `pr` input of the dispatch. Write `pr` as in this example:
+
+```yaml
+- id: prepare
+  uses: solmyrhq/actions/review-prepare@<commit sha>
+  with:
+      token: ${{ github.token }}
+      pr: ${{ github.event.pull_request.number || inputs.pr }}
+      artifact-prefix: codex-review
+```
+
+Give `artifact` to the publish job through an output of the review job. Do not make the name again in the publish job. If you re-run only the publish job, its run attempt is higher than the run attempt of the review job that uploaded the artifact. Thus, a name that the publish job makes from its own run attempt is not the name of the artifact.
+
+`toolkit/github.js` is the REST and GraphQL client that `review-prepare` and `review-publish` use.
+
 ## review-check
 
 The review job runs this action after the model finishes. The action checks the files that the model wrote under `directory`: a non-empty `summary.md`, a valid inline comment on the head commit in each `comment-*.json`, and a valid `resolve.json`. `resolve.json` is optional. If `resolve.json` is missing or empty, the action uses an empty list of threads and writes this list to `resolve.json`. Each thread in `resolve.json` must also be listed in the summary. The action then adds this run's marker, `<!-- <marker>:<head sha>:<run id>:<run attempt> -->`, as the first line of the summary and of each inline comment. The action fails if `summary.md` is missing or empty, or if `resolve.json` or a `comment-*.json` file is not valid. It also fails if the summary does not list a thread in `resolve.json`, or if the summary or an inline comment already starts with a marker. A marker lower in the text is allowed, because a review can quote an earlier comment.

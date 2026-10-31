@@ -8,7 +8,8 @@ const { test } = require("node:test");
 const lib = require("./lib.js");
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
-const MARKER = lib.runMarker("codex-code-review", SHA, "42", "1");
+const RUN = { id: "42", attempt: "1" };
+const MARKER = lib.runMarker("codex-code-review", SHA, RUN);
 
 function scratch(files = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "review-check-"));
@@ -23,9 +24,8 @@ const comment = (extra = {}) => ({ body: "**issue (blocking):** x", commit_id: S
 
 test("the marker names the review, the head commit, the run and the attempt", () => {
   assert.equal(MARKER, `<!-- codex-code-review:${SHA}:42:1 -->`);
-  assert.throws(() => lib.runMarker("Codex review", SHA, "42", "1"));
-  assert.throws(() => lib.runMarker("codex-code-review", "abc", "42", "1"));
-  assert.throws(() => lib.runMarker("codex-code-review", SHA, "", "1"));
+  assert.throws(() => lib.runMarker("Codex review", SHA, RUN), /marker must be/);
+  assert.throws(() => lib.runMarker("codex-code-review", "abc", RUN), /head-sha/);
 });
 
 test("the summary and each inline comment get the marker on their first line", () => {

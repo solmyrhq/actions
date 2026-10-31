@@ -23,6 +23,24 @@ function appendCommandFile(variable, name, value) {
 const saveState = (name, value) => appendCommandFile("GITHUB_STATE", name, value);
 const setOutput = (name, value) => appendCommandFile("GITHUB_OUTPUT", name, value);
 
+function hyphenatedName(label, value, example) {
+  if (typeof value !== "string" || !/^[a-z]+(?:-[a-z]+)*$/.test(value)) {
+    throw new Error(`${label} must be lowercase words joined by hyphens, such as '${example}': ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+// Returns the ID and the attempt number of the current workflow run, as
+// strings of digits.
+function currentRun(env = process.env) {
+  const id = env.GITHUB_RUN_ID ?? "";
+  const attempt = env.GITHUB_RUN_ATTEMPT ?? "";
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(attempt)) {
+    throw new Error("GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be numbers.");
+  }
+  return { id, attempt };
+}
+
 // Text that a model or a pull request chose must not start a log line: the
 // runner reads a line that starts with `::` as a workflow command.
 function escapeData(text) {
@@ -45,4 +63,4 @@ function run(main) {
   });
 }
 
-module.exports = { input, saveState, setOutput, escapeData, annotate, info, run };
+module.exports = { input, saveState, setOutput, hyphenatedName, currentRun, escapeData, annotate, info, run };

@@ -7,15 +7,11 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { hyphenatedName } = require("../toolkit/action.js");
 
 const SIDES = ["RIGHT", "LEFT"];
 
-function validateMarkerName(name) {
-  if (!/^[a-z][a-z-]*[a-z]$/.test(name)) {
-    throw new Error(`marker must be lowercase words joined by hyphens, such as 'codex-code-review': ${JSON.stringify(name)}`);
-  }
-  return name;
-}
+const validateMarkerName = (name) => hyphenatedName("marker", name, "codex-code-review");
 
 function validateSha(sha) {
   if (!/^[0-9a-f]{40}$/.test(sha)) {
@@ -24,11 +20,9 @@ function validateSha(sha) {
   return sha;
 }
 
-function runMarker(name, headSha, runId, runAttempt) {
-  if (!/^\d+$/.test(runId) || !/^\d+$/.test(runAttempt)) {
-    throw new Error("GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be numbers.");
-  }
-  return `<!-- ${validateMarkerName(name)}:${validateSha(headSha)}:${runId}:${runAttempt} -->`;
+// `run` comes from `currentRun()`.
+function runMarker(name, headSha, run) {
+  return `<!-- ${validateMarkerName(name)}:${validateSha(headSha)}:${run.id}:${run.attempt} -->`;
 }
 
 const isPositiveInteger = (value) => Number.isInteger(value) && value > 0;
