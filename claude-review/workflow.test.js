@@ -35,6 +35,14 @@ test("the skill reaches Claude through a temporary configuration directory, not 
   assert.match(cleanup, /\n {14}if: always\(\)\n/);
 });
 
+test("Claude uses the default API server and no key command, whatever the project's settings say", () => {
+  const setup = review("Set up Claude's configuration");
+  assert.ok(setup.includes(`jq -n '{apiKeyHelper: "", env: {ANTHROPIC_BASE_URL: "https://api.anthropic.com"}}' > "$RUNNER_TEMP/claude-review/settings.json"`));
+  assert.ok(setup.includes('echo "settings=$RUNNER_TEMP/claude-review/settings.json" >> "$GITHUB_OUTPUT"'));
+  assert.match(review("Review the pull request"), /\n {22}--settings \$\{\{ steps\.config\.outputs\.settings \}\}\n/);
+  assert.doesNotMatch(review("Review the pull request"), /\n {18}settings:/);
+});
+
 test("the checkout keeps no credentials, and the app token is removed from it even after a failure", () => {
   assert.match(review("Check out the pull request"), /persist-credentials: false/);
   assert.match(review("Remove the app token from the checkout"), /if: always\(\)/);

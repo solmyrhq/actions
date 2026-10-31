@@ -171,6 +171,8 @@ jobs:
 
 Before Claude starts, `claude-code-action` puts back `.claude/`, `CLAUDE.md` and the other configuration paths of Claude Code from the base branch. It removes each of these paths that the base branch does not have. The skill therefore cannot be in the checkout. The workflow copies the skill from the `skills` action into a temporary `CLAUDE_CONFIG_DIR`. Claude Code loads user skills from this directory.
 
+Claude Code reads the `.claude/settings.json` of the base branch as its project settings. If that file has a value for `env.ANTHROPIC_BASE_URL`, Claude Code sends its requests to that server. If that file has a value for `apiKeyHelper`, Claude Code runs that command to get its key. If the runner cannot connect to that server or cannot run that command, the review fails. For example, the `.claude/settings.json` of `solmyrhq/agent-config` is also the global settings file of its owner, and its `env.ANTHROPIC_BASE_URL` is a server on a private tailnet. The workflow therefore writes a settings file in which `apiKeyHelper` is an empty string and `env.ANTHROPIC_BASE_URL` is `https://api.anthropic.com`. The workflow gives this file to Claude Code with `--settings`. Claude Code uses a value from `--settings` before a value from the project settings, and a value from the project settings before a value from the user settings. The `settings` input of `claude-code-action` cannot replace the values of the project, because the action merges that input into `~/.claude/settings.json`, which holds the user settings.
+
 The Claude workflow has no manual trigger (`workflow_dispatch`). Without a pull request in the event, `claude-code-action` has no pull request to comment on.
 
 ### Change a review
