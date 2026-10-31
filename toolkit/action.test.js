@@ -16,8 +16,8 @@ test("a name is lowercase words joined by single hyphens, and the error names th
   for (const good of ["codex", "codex-review", "opencode-code-review"]) {
     assert.equal(toolkit.hyphenatedName("marker", good, "codex-code-review"), good);
   }
-  for (const bad of ["Codex", "codex_review", "-codex", "codex-", "codex--review", "codex review", ""]) {
-    assert.throws(() => toolkit.hyphenatedName("artifact-prefix", bad, "codex-review"), /^Error: artifact-prefix must be .* such as 'codex-review'/, bad);
+  for (const bad of ["Codex", "codex_review", "-codex", "codex-", "codex--review", "codex review", "", undefined, null, true]) {
+    assert.throws(() => toolkit.hyphenatedName("artifact-prefix", bad, "codex-review"), /^Error: artifact-prefix must be .* such as 'codex-review'/, String(bad));
   }
 });
 

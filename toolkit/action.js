@@ -24,7 +24,7 @@ const saveState = (name, value) => appendCommandFile("GITHUB_STATE", name, value
 const setOutput = (name, value) => appendCommandFile("GITHUB_OUTPUT", name, value);
 
 function hyphenatedName(label, value, example) {
-  if (!/^[a-z]+(?:-[a-z]+)*$/.test(value)) {
+  if (typeof value !== "string" || !/^[a-z]+(?:-[a-z]+)*$/.test(value)) {
     throw new Error(`${label} must be lowercase words joined by hyphens, such as '${example}': ${JSON.stringify(value)}`);
   }
   return value;
