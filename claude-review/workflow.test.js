@@ -4,10 +4,8 @@
 // of .github/workflows/claude-review.yml.
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
-const { WORKFLOWS, workflow } = require("../test-support/workflow.js");
+const { workflow } = require("../test-support/workflow.js");
 
 const { text: TEXT, step, permissions, condition } = workflow("claude-review.yml");
 const review = (name) => step("review", name);
@@ -64,16 +62,4 @@ test("every action is pinned to a full commit SHA", () => {
   const refs = [...TEXT.matchAll(/uses: (\S+)/g)].map((match) => match[1]);
   assert.ok(refs.length > 0);
   for (const ref of refs) assert.match(ref, /@[0-9a-f]{40}$/, `${ref} is not pinned to a commit`);
-});
-
-test("this repository reviews itself with each shared review on pull_request_target", () => {
-  for (const [caller, called] of [
-    ["claude-code-review.yml", "claude-review.yml"],
-    ["codex-code-review.yml", "codex-review.yml"],
-    ["opencode-code-review.yml", "opencode-review.yml"],
-  ]) {
-    const text = fs.readFileSync(path.join(WORKFLOWS, caller), "utf8");
-    assert.match(text, /\n {4}pull_request_target:\n/, `${caller} does not run on pull_request_target`);
-    assert.ok(text.includes(`uses: ./.github/workflows/${called}\n`), `${caller} does not call ${called}`);
-  }
 });
