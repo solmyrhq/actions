@@ -1,0 +1,64 @@
+name: Code review
+
+# Each review runs only when its name is in the CODE_REVIEWS variable.
+on:
+    workflow_call:
+        inputs:
+            pr:
+                description: Pull request number, for a manual dispatch.
+                type: string
+                default: ""
+            guide:
+                description: >-
+                    Path of the file in the calling repository that holds the
+                    instructions for agents. The workflow reads this file from
+                    the pull request's base commit.
+                type: string
+                default: CLAUDE.md
+        secrets:
+            CLAUDE_CODE_OAUTH_TOKEN:
+                required: false
+            OPENROUTER_API_KEY:
+                required: false
+            CLIPROXY_API_KEY:
+                required: false
+            CODE_REVIEW_TS_OAUTH_SECRET:
+                required: false
+
+permissions: {}
+
+# GitHub documents that `$/` resolves to this repository at the running commit,
+# whichever repository calls this workflow. GitHub does not document that `./`
+# resolves this way in a nested call.
+jobs:
+    claude:
+        uses: $/.github/workflows/claude-review.yml
+        permissions:
+            contents: read
+            id-token: write
+            actions: read
+        secrets:
+            CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+    codex:
+        uses: $/.github/workflows/codex-review.yml
+        permissions:
+            contents: write
+            pull-requests: write
+        with:
+            pr: ${{ inputs.pr }}
+            guide: ${{ inputs.guide }}
+        secrets:
+            CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+            CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
+
+    opencode:
+        uses: $/.github/workflows/opencode-review.yml
+        permissions:
+            contents: write
+            pull-requests: write
+        with:
+            pr: ${{ inputs.pr }}
+            guide: ${{ inputs.guide }}
+        secrets:
+            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
