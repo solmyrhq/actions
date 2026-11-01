@@ -7,8 +7,9 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { workflow } = require("../test-support/workflow.js");
 
-const { text: TEXT, step, permissions, condition } = workflow("claude-review.yml");
+const { text: TEXT, job, step, permissions, condition } = workflow("claude-review.yml");
 const review = (name) => step("review", name);
+const reviewJob = () => job("review");
 
 test("the workflow grants no permission at the top level", () => {
   assert.match(TEXT, /\npermissions: \{\}\n/);
@@ -39,6 +40,17 @@ test("Claude uses the default API server and no key command, whatever the projec
   assert.ok(setup.includes('echo "settings=$RUNNER_TEMP/claude-review/settings.json" >> "$GITHUB_OUTPUT"'));
   assert.match(review("Review the pull request"), /\n {22}--settings \$\{\{ steps\.config\.outputs\.settings \}\}\n/);
   assert.doesNotMatch(review("Review the pull request"), /\n {18}settings:/);
+});
+
+test("the job starts and ends with an empty inline-comment buffer, even after a failure", () => {
+  const steps = [...reviewJob().matchAll(/\n {12}- name: (.+)\n/g)].map((match) => match[1]);
+  assert.equal(steps[0], "Clear claude-code-action's inline-comment buffer");
+  assert.equal(steps.at(-1), "Clear claude-code-action's inline-comment buffer again");
+  for (const name of [steps[0], steps.at(-1)]) {
+    assert.match(review(name), /\n {14}run: rm -f \/tmp\/inline-comments-buffer\.jsonl\n/);
+  }
+  assert.doesNotMatch(review(steps[0]), /\n {14}if:/);
+  assert.match(review(steps.at(-1)), /\n {14}if: always\(\)\n/);
 });
 
 test("the checkout keeps no credentials, and the app token is removed from it even after a failure", () => {
