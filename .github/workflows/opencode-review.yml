@@ -43,8 +43,8 @@ jobs:
             pull-requests: read
         outputs:
             review: ${{ steps.prepare.outputs.review }}
-            pr_number: ${{ steps.prepare.outputs.pr_number }}
-            head_sha: ${{ steps.prepare.outputs.head_sha }}
+            pr_number: ${{ steps.prepare.outputs.pr-number }}
+            head_sha: ${{ steps.prepare.outputs.head-sha }}
             # A re-run of only the publish job has a higher run_attempt than
             # the attempt that uploaded the artifact.
             artifact: ${{ steps.prepare.outputs.artifact }}
@@ -52,36 +52,11 @@ jobs:
             - name: Check the pull request
               id: prepare
               timeout-minutes: 3
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-                  REPOSITORY: ${{ github.repository }}
-              run: |
-                  # `gh pr view` also takes a pull request URL, and a URL can
-                  # name a pull request in another repository.
-                  case "$PR_NUMBER" in
-                      '' | *[!0-9]*)
-                          echo "Give the pull request as a number, not '$PR_NUMBER'." >&2
-                          exit 1
-                          ;;
-                  esac
-                  pr_json="$RUNNER_TEMP/pr.json"
-                  if ! gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,isCrossRepository,baseRefOid,headRefOid > "$pr_json"; then
-                      echo "Could not read pull request #$PR_NUMBER." >&2
-                      exit 1
-                  fi
-                  if [ "$(jq -r '.state' "$pr_json")" != "OPEN" ] || [ "$(jq -r '.isDraft' "$pr_json")" = "true" ] || [ "$(jq -r '.isCrossRepository' "$pr_json")" = "true" ]; then
-                      echo "Pull request #$PR_NUMBER is closed, a draft, or from a fork; skipping." >&2
-                      echo "review=false" >> "$GITHUB_OUTPUT"
-                      exit 0
-                  fi
-                  {
-                      echo "review=true"
-                      echo "pr_number=$PR_NUMBER"
-                      echo "head_sha=$(jq -r '.headRefOid' "$pr_json")"
-                      echo "base_sha=$(jq -r '.baseRefOid' "$pr_json")"
-                      echo "artifact=opencode-review-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-                  } >> "$GITHUB_OUTPUT"
+              uses: solmyrhq/actions/review-prepare@9893d8eac03120a797314d7c4b2b38a9170b03a6
+              with:
+                  token: ${{ github.token }}
+                  pr: ${{ github.event.pull_request.number || inputs.pr }}
+                  artifact-prefix: opencode-review
 
             - name: Check out the pull request
               id: checkout
@@ -89,19 +64,19 @@ jobs:
               timeout-minutes: 2
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
-                  ref: ${{ steps.prepare.outputs.head_sha }}
+                  ref: ${{ steps.prepare.outputs.head-sha }}
                   fetch-depth: 1
                   persist-credentials: false
 
             - name: Get the review harness
               id: harness
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/opencode-review@979ffa1c5c4818caf082fb0c2b13b689928df8e8
+              uses: solmyrhq/actions/opencode-review@9893d8eac03120a797314d7c4b2b38a9170b03a6
 
             - name: Get the review skills
               id: skills
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/skills@979ffa1c5c4818caf082fb0c2b13b689928df8e8
+              uses: solmyrhq/actions/skills@9893d8eac03120a797314d7c4b2b38a9170b03a6
 
             # OpenCode runs the plugins in .opencode before it consults any
             # permission. No permission rule can stop a plugin that the pull
@@ -113,7 +88,7 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
                   REPOSITORY: ${{ github.repository }}
-                  BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
+                  BASE_SHA: ${{ steps.prepare.outputs.base-sha }}
                   GUIDE: ${{ inputs.guide }}
                   HARNESS: ${{ steps.harness.outputs.path }}
                   SKILLS: ${{ steps.skills.outputs.path }}
@@ -154,7 +129,7 @@ jobs:
               timeout-minutes: 3
               env:
                   GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ steps.prepare.outputs.pr_number }}
+                  PR_NUMBER: ${{ steps.prepare.outputs.pr-number }}
                   REPOSITORY: ${{ github.repository }}
               run: |
                   rm -rf review-output
@@ -201,9 +176,9 @@ jobs:
               timeout-minutes: 50
               env:
                   GH_TOKEN: ${{ github.token }}
-                  PR_NUMBER: ${{ steps.prepare.outputs.pr_number }}
+                  PR_NUMBER: ${{ steps.prepare.outputs.pr-number }}
                   REPOSITORY: ${{ github.repository }}
-                  HEAD_SHA: ${{ steps.prepare.outputs.head_sha }}
+                  HEAD_SHA: ${{ steps.prepare.outputs.head-sha }}
                   HARNESS: ${{ steps.harness.outputs.path }}
                   HOME: ${{ runner.temp }}/opencode-home
                   XDG_CONFIG_HOME: ${{ runner.temp }}/opencode-home/config
@@ -256,11 +231,11 @@ jobs:
             - name: Check the review
               id: verify
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/review-check@979ffa1c5c4818caf082fb0c2b13b689928df8e8
+              uses: solmyrhq/actions/review-check@9893d8eac03120a797314d7c4b2b38a9170b03a6
               with:
                   directory: review-output
                   marker: opencode-code-review
-                  head-sha: ${{ steps.prepare.outputs.head_sha }}
+                  head-sha: ${{ steps.prepare.outputs.head-sha }}
 
             - name: Upload the review
               id: upload
@@ -280,7 +255,7 @@ jobs:
               id: cleanup
               if: always()
               timeout-minutes: 1
-              run: rm -rf review-output "$RUNNER_TEMP/opencode" "$RUNNER_TEMP/opencode-home" "$RUNNER_TEMP/opencode-secrets" "$RUNNER_TEMP/guide.md" "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/threads-pages.json"
+              run: rm -rf review-output "$RUNNER_TEMP/opencode" "$RUNNER_TEMP/opencode-home" "$RUNNER_TEMP/opencode-secrets" "$RUNNER_TEMP/guide.md" "$RUNNER_TEMP/threads-pages.json"
 
     publish:
         name: Post the OpenCode review
@@ -303,7 +278,7 @@ jobs:
             - name: Post the review
               id: publish
               timeout-minutes: 25
-              uses: solmyrhq/actions/review-publish@979ffa1c5c4818caf082fb0c2b13b689928df8e8
+              uses: solmyrhq/actions/review-publish@9893d8eac03120a797314d7c4b2b38a9170b03a6
               with:
                   token: ${{ github.token }}
                   directory: review-output

@@ -76,7 +76,7 @@ jobs:
 
             - name: Get the review skills
               id: skills
-              uses: solmyrhq/actions/skills@979ffa1c5c4818caf082fb0c2b13b689928df8e8
+              uses: solmyrhq/actions/skills@9893d8eac03120a797314d7c4b2b38a9170b03a6
 
             # claude-code-action would remove a skill in the checkout's .claude/.
             #
