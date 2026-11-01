@@ -51,6 +51,15 @@ jobs:
             id-token: write
             actions: read # claude-code-action skips its github_ci MCP server without this.
         steps:
+            # claude-code-action posts every comment in
+            # /tmp/inline-comments-buffer.jsonl to the current pull request,
+            # and never deletes the file. The path is a constant in the pinned
+            # action's post-buffered-inline-comments.ts. When you change the
+            # pin, check that the path is the same.
+            - name: Clear claude-code-action's inline-comment buffer
+              timeout-minutes: 1
+              run: rm -f /tmp/inline-comments-buffer.jsonl
+
             # Before Claude starts, claude-code-action restores .claude/,
             # CLAUDE.md and Claude Code's other configuration paths from the
             # base branch, and removes those that the base branch lacks.
@@ -159,3 +168,10 @@ jobs:
               if: always()
               timeout-minutes: 1
               run: rm -rf "$RUNNER_TEMP/claude-review"
+
+            # claude-code-action posts the buffered comments inside its own
+            # step, before this one runs.
+            - name: Clear claude-code-action's inline-comment buffer again
+              if: always()
+              timeout-minutes: 1
+              run: rm -f /tmp/inline-comments-buffer.jsonl
