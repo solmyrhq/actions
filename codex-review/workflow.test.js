@@ -81,7 +81,7 @@ test("the pull request's agent files are removed for the run and restored from t
 test("the sandbox is checked before the model starts, outside the pull request's checkout", () => {
   assert.ok(TEXT.indexOf("- name: Check the Codex sandbox") < TEXT.indexOf("- name: Review the pull request"));
   const check = review("Check the Codex sandbox");
-  assert.match(check, /"\$CODEX" sandbox -C "\$empty" -- true/);
+  assert.match(check, /"\$CODEX" sandbox --permission-profile :read-only -C "\$empty" -- true/);
   assert.ok(check.includes('empty="$RUNNER_TEMP/codex-review/sandbox-check"'));
   assert.doesNotMatch(check, /GITHUB_WORKSPACE/);
 });
