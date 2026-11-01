@@ -70,6 +70,14 @@ jobs:
               uses: solmyrhq/actions/skills@979ffa1c5c4818caf082fb0c2b13b689928df8e8
 
             # claude-code-action would remove a skill in the checkout's .claude/.
+            #
+            # The base branch's .claude/settings.json is Claude Code's project
+            # settings. Its env.ANTHROPIC_BASE_URL can be a server that the
+            # runner cannot reach, and its apiKeyHelper a command that the
+            # runner cannot run. In either case, the review fails. The
+            # action's `settings` input cannot replace these values, because
+            # the action merges it into the user settings, which rank below
+            # the project settings.
             - name: Set up Claude's configuration
               id: config
               timeout-minutes: 1
@@ -80,7 +88,9 @@ jobs:
                   rm -rf "$RUNNER_TEMP/claude-review"
                   mkdir -p "$config/skills"
                   cp -R "$SKILLS/exhaustive-review" "$config/skills/exhaustive-review"
+                  jq -n '{apiKeyHelper: "", env: {ANTHROPIC_BASE_URL: "https://api.anthropic.com"}}' > "$RUNNER_TEMP/claude-review/settings.json"
                   echo "path=$config" >> "$GITHUB_OUTPUT"
+                  echo "settings=$RUNNER_TEMP/claude-review/settings.json" >> "$GITHUB_OUTPUT"
 
             - name: Review the pull request
               id: claude-review
@@ -107,6 +117,7 @@ jobs:
                   claude_args: |
                       --model ${{ inputs.model }}
                       --effort ${{ inputs.effort }}
+                      --settings ${{ steps.config.outputs.settings }}
                       --allowedTools
                       "Read"
                       "Glob"

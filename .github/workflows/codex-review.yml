@@ -200,7 +200,8 @@ jobs:
             # unprivileged user namespaces on the runner. The sandbox is checked
             # in an empty directory because Codex reads project configuration
             # from .codex/, and the checkout's .codex/ comes from the pull
-            # request.
+            # request. On Linux, `codex sandbox` requires a permission profile;
+            # :read-only matches the review's sandbox_mode.
             - name: Check the Codex sandbox
               id: sandbox
               if: steps.prepare.outputs.review == 'true'
@@ -211,7 +212,7 @@ jobs:
               run: |
                   empty="$RUNNER_TEMP/codex-review/sandbox-check"
                   mkdir -p "$CODEX_HOME" "$empty"
-                  "$CODEX" sandbox -C "$empty" -- true
+                  "$CODEX" sandbox --permission-profile :read-only -C "$empty" -- true
 
             - name: Set up Codex
               id: setup
