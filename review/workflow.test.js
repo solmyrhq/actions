@@ -119,11 +119,13 @@ test("code-review.yml grants the union of the permissions of review.yml's jobs, 
   assert.match(CALLER.job("review"), /\n {8}secrets: inherit\n/);
 });
 
-test("review.yml runs the Claude and OpenCode reviews only in private repositories, and the Codex review in every repository", () => {
-  for (const id of ["claude", "opencode"]) {
-    assert.match(DISPATCHER.job(id), /\n {8}if: github\.event\.repository\.private\n/, `${id} also runs in a public repository`);
+test("the Claude and OpenCode reviews run only in private repositories, even when a caller calls their workflows directly", () => {
+  for (const name of ["claude-review.yml", "opencode-review.yml"]) {
+    assert.match(workflow(name).condition("review"), /&&\s+github\.event\.repository\.private &&/, `${name} also runs in a public repository`);
   }
-  assert.doesNotMatch(DISPATCHER.job("codex"), /\n {8}if: /);
+  for (const id of Object.keys(REVIEWS)) {
+    assert.doesNotMatch(DISPATCHER.job(id), /\n {8}if: /, `review.yml skips ${id} itself`);
+  }
 });
 
 test("no workflow in this repository other than review.yml calls a review workflow", () => {

@@ -32,13 +32,8 @@ permissions: {}
 # GitHub documents that `$/` resolves to this repository at the running commit,
 # whichever repository calls this workflow. GitHub does not document that `./`
 # resolves this way in a nested call.
-#
-# The Claude and OpenCode reviews run only in private repositories while their
-# models can read every pull request comment, which anyone can post in a public
-# repository.
 jobs:
     claude:
-        if: github.event.repository.private
         uses: $/.github/workflows/claude-review.yml
         permissions:
             contents: read
@@ -61,7 +56,6 @@ jobs:
             CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
 
     opencode:
-        if: github.event.repository.private
         uses: $/.github/workflows/opencode-review.yml
         permissions:
             contents: write

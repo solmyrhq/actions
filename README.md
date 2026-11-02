@@ -52,7 +52,7 @@ Three reusable workflows review a pull request with the `exhaustive-review` skil
 
 ### Turn a review on or off
 
-`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. A repository variable with the same name replaces the organization's value for that repository. If the name of a workflow is not in the list, the workflow skips the review job and posts nothing. To change the reviews that run, change the variable. You do not have to change the callers. In a public repository, only the Codex review can run (see "Public repositories").
+`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. A repository variable with the same name replaces the organization's value for that repository. If the name of a workflow is not in the list, the review job of that workflow does not run, and the workflow posts nothing. To change the reviews that run, change the variable. You do not have to change the callers. In a public repository, only the Codex review can run (see "Public repositories").
 
 ### Call the reviews
 
@@ -98,7 +98,7 @@ To review a pull request again, run the caller from the Actions tab and give the
 
 Anyone can comment on a pull request in a public repository. A comment can contain instructions for the model. The model posts its review on the pull request, where everyone can read it. Thus, in a public repository:
 
-- Only the Codex review runs. `review.yml` skips the Claude and OpenCode reviews, because in those reviews the model can read every comment on the pull request.
+- Only the Codex review runs. In the Claude and OpenCode reviews, the model can read every comment on the pull request. Thus, in the Claude and OpenCode workflows, the review job does not run. This is also true when a caller calls one of these workflows directly.
 - The Codex review gives the model only the comments of bots, of the pull request's author, and of people whose author association is `OWNER`, `MEMBER` or `COLLABORATOR`.
 - The Codex review runs on a GitHub-hosted runner, because public repositories cannot use the organization's self-hosted runners. Each job on a GitHub-hosted runner gets a new virtual machine. Thus, the model cannot read the files of other jobs.
 
@@ -144,7 +144,7 @@ Before Claude starts, `claude-code-action` puts back `.claude/`, `CLAUDE.md` and
 
 Claude Code reads the `.claude/settings.json` of the base branch as its project settings. If that file has a value for `env.ANTHROPIC_BASE_URL`, Claude Code sends its requests to that server. If that file has a value for `apiKeyHelper`, Claude Code runs that command to get its key. If the runner cannot connect to that server or cannot run that command, the review fails. For example, in the `.claude/settings.json` of a repository, `env.ANTHROPIC_BASE_URL` can be a server on a private network of the repository's owner. The workflow therefore writes a settings file in which `apiKeyHelper` is an empty string and `env.ANTHROPIC_BASE_URL` is `https://api.anthropic.com`. The workflow gives this file to Claude Code with `--settings`. Claude Code uses a value from `--settings` before a value from the project settings, and a value from the project settings before a value from the user settings. The `settings` input of `claude-code-action` cannot replace the values of the project, because the action merges that input into `~/.claude/settings.json`, which holds the user settings.
 
-In a manual run of the caller (`workflow_dispatch`), the Claude workflow skips the review job. Without a pull request in the event, `claude-code-action` has no pull request to comment on.
+In a manual run of the caller (`workflow_dispatch`), the review job of the Claude workflow does not run. Without a pull request in the event, `claude-code-action` has no pull request to comment on.
 
 ### Change a review
 

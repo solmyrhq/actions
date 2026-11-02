@@ -30,8 +30,12 @@ jobs:
         # CODE_REVIEWS is an organization variable, and can be overridden by a
         # repository variable of the same name. Its value is the list of reviews
         # to run, separated by commas with no spaces, such as `claude,codex`.
+        #
+        # Pull requests in a public repository are not reviewed: anyone can
+        # comment on them, and the model can read every comment.
         if: >-
-            contains(format(',{0},', vars.CODE_REVIEWS), ',opencode,') && (
+            contains(format(',{0},', vars.CODE_REVIEWS), ',opencode,') &&
+            github.event.repository.private && (
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'pull_request_target' &&
              github.event.pull_request.head.repo.full_name == github.repository &&
