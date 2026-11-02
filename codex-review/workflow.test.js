@@ -44,6 +44,36 @@ test("the proxy key reaches only the step that runs Codex and the step that look
   assert.match(review("Check that the review holds no key"), /CLIPROXY_API_KEY: \$\{\{ secrets\.CLIPROXY_API_KEY \}\}/);
 });
 
+test("the CLIProxyAPI base URL comes only from the CLIPROXY_BASE_URL secret, in the step that runs Codex", () => {
+  assert.doesNotMatch(TEXT, /base-url|ts\.net/);
+  const uses = TEXT.match(/secrets\.CLIPROXY_BASE_URL/g) ?? [];
+  assert.equal(uses.length, 1);
+  assert.match(review("Review the pull request"), /BASE_URL: \$\{\{ secrets\.CLIPROXY_BASE_URL \}\}/);
+});
+
+test("both jobs run on the self-hosted runners in a private repository and on a GitHub-hosted runner in a public one", () => {
+  const runsOn = /\n {8}runs-on: \$\{\{ github\.event\.repository\.private && fromJSON\('\["self-hosted", "X64"\]'\) \|\| 'ubuntu-latest' \}\}\n/;
+  assert.match(job("review"), runsOn);
+  assert.match(job("publish"), runsOn);
+});
+
+test("unprivileged user namespaces are allowed only on a GitHub-hosted runner, before the sandbox check", () => {
+  const userns = review("Allow unprivileged user namespaces");
+  assert.match(userns, /runner\.environment == 'github-hosted'/);
+  assert.match(userns, /sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0/);
+  assert.ok(TEXT.indexOf("- name: Allow unprivileged user namespaces") < TEXT.indexOf("- name: Check the Codex sandbox"));
+});
+
+test("the model gets only the comments of bots, of the pull request's author and of people with access to the repository", () => {
+  const read = review("Read the pull request");
+  for (const file of ["review-comments.json", "reviews.json", "issue-comments.json"]) {
+    assert.ok(read.includes(`"$context/${file}" "$trusted"`), `${file} is not filtered`);
+  }
+  assert.ok(!read.includes('"$context/files.json" "$trusted"'), "the changed files are filtered too");
+  assert.match(read, /trusted='map\(select\(\.user\.type == "Bot" or \.user\.login == \$author or \(\.author_association \| IN\("OWNER", "MEMBER", "COLLABORATOR"\)\)\)\)'/);
+  assert.match(read, /\.comments\.nodes \|= map\(select\(\.author\.__typename == "Bot" or \.author\.login == \$author or \(\.authorAssociation \| IN\("OWNER", "MEMBER", "COLLABORATOR"\)\)\)\)/);
+});
+
 test("the step that runs Codex holds no GitHub token", () => {
   assert.doesNotMatch(review("Review the pull request"), /GH_TOKEN|GITHUB_TOKEN|github\.token/);
 });

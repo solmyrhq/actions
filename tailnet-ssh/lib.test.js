@@ -41,8 +41,8 @@ test("the known-hosts script exits without output unless the fingerprint is the 
 });
 
 test("the SSH config has a tailscale nc ProxyCommand and strict host key checking", () => {
-  const config = lib.sshConfig({ host: "linux-hetzner-4", tailscale: "/t/tailscale", socket: "/t/sock", knownHostsCommand: "/t/kh" });
-  assert.match(config, /^Host linux-hetzner-4$/m);
+  const config = lib.sshConfig({ host: "deploy-host", tailscale: "/t/tailscale", socket: "/t/sock", knownHostsCommand: "/t/kh" });
+  assert.match(config, /^Host deploy-host$/m);
   assert.match(config, /ProxyCommand "\/t\/tailscale" --socket="\/t\/sock" nc %h %p/);
   assert.match(config, /StrictHostKeyChecking yes/);
   assert.match(config, /UserKnownHostsFile \/dev\/null/);

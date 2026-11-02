@@ -14,10 +14,6 @@ on:
                     the pull request's base commit.
                 type: string
                 default: CLAUDE.md
-            base-url:
-                description: Base URL of the CLIProxyAPI Responses endpoint, on the tailnet.
-                type: string
-                default: https://linux-bruno.elephant-monitor.ts.net:8317/v1
             model:
                 description: Model for the review and its sub-agents.
                 type: string
@@ -28,6 +24,8 @@ on:
                 default: xhigh
         secrets:
             CLIPROXY_API_KEY:
+                required: true
+            CLIPROXY_BASE_URL:
                 required: true
             CODE_REVIEW_TS_OAUTH_SECRET:
                 required: true
@@ -54,7 +52,7 @@ jobs:
             (github.event_name == 'pull_request_target' &&
              github.event.pull_request.head.repo.full_name == github.repository &&
              !github.event.pull_request.draft))
-        runs-on: [self-hosted, X64]
+        runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted", "X64"]') || 'ubuntu-latest' }}
         timeout-minutes: 150
         permissions:
             contents: read
@@ -115,16 +113,18 @@ jobs:
                       echo "Could not read the guide $GUIDE at the base commit $BASE_SHA." >&2
                       exit 1
                   fi
-                  gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,title,body,baseRefName,baseRefOid,headRefName,headRefOid > "$context/pull-request.json"
+                  gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,title,body,author,baseRefName,baseRefOid,headRefName,headRefOid > "$context/pull-request.json"
+                  author=$(jq -r '.author.login' "$context/pull-request.json")
+                  trusted='map(select(.user.type == "Bot" or .user.login == $author or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))))'
                   # gh exits with an error when --slurp and --jq are both given.
                   list() {
                       gh api "$1" --paginate --slurp > "$RUNNER_TEMP/codex-review/pages.json"
-                      jq 'add // []' "$RUNNER_TEMP/codex-review/pages.json" > "$2"
+                      jq --arg author "$author" "add // [] | ${3:-.}" "$RUNNER_TEMP/codex-review/pages.json" > "$2"
                   }
                   list "repos/$REPOSITORY/pulls/$PR_NUMBER/files" "$context/files.json"
-                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/comments" "$context/review-comments.json"
-                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" "$context/reviews.json"
-                  list "repos/$REPOSITORY/issues/$PR_NUMBER/comments" "$context/issue-comments.json"
+                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/comments" "$context/review-comments.json" "$trusted"
+                  list "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" "$context/reviews.json" "$trusted"
+                  list "repos/$REPOSITORY/issues/$PR_NUMBER/comments" "$context/issue-comments.json" "$trusted"
                   # shellcheck disable=SC2016 # The $variables are GraphQL variables.
                   gh api graphql --paginate --slurp \
                       -f owner="${REPOSITORY%/*}" \
@@ -138,13 +138,15 @@ jobs:
                           pageInfo { hasNextPage endCursor }
                           nodes {
                             id isResolved isOutdated path line originalLine
-                            comments(first: 100) { nodes { author { login } body createdAt } }
+                            comments(first: 100) { nodes { author { __typename login } authorAssociation body createdAt } }
                           }
                         }
                       }
                     }
                   }' > "$RUNNER_TEMP/codex-review/pages.json"
-                  jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' "$RUNNER_TEMP/codex-review/pages.json" > "$context/threads.json"
+                  jq --arg author "$author" '[.[].data.repository.pullRequest.reviewThreads.nodes[]
+                    | .comments.nodes |= map(select(.author.__typename == "Bot" or .author.login == $author or (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR"))))
+                    | select(.comments.nodes | length > 0)]' "$RUNNER_TEMP/codex-review/pages.json" > "$context/threads.json"
                   rm "$RUNNER_TEMP/codex-review/pages.json"
                   if ! gh pr diff "$PR_NUMBER" --repo "$REPOSITORY" > "$context/diff.patch"; then
                       rm -f "$context/diff.patch"
@@ -170,6 +172,12 @@ jobs:
                   tar --extract --gzip --file "$dir/codex.tgz" --directory "$dir"
                   rm "$dir/codex.tgz"
                   echo "codex=$dir/bin/codex" >> "$GITHUB_OUTPUT"
+
+            - name: Allow unprivileged user namespaces
+              id: userns
+              if: steps.prepare.outputs.review == 'true' && runner.environment == 'github-hosted'
+              timeout-minutes: 1
+              run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
             # Codex runs the model's commands in bubblewrap, which needs
             # unprivileged user namespaces on the runner. The sandbox is checked
@@ -237,7 +245,7 @@ jobs:
                   PR_NUMBER: ${{ steps.prepare.outputs.pr-number }}
                   REPOSITORY: ${{ github.repository }}
                   HEAD_SHA: ${{ steps.prepare.outputs.head-sha }}
-                  BASE_URL: ${{ inputs.base-url }}
+                  BASE_URL: ${{ secrets.CLIPROXY_BASE_URL }}
                   MODEL: ${{ inputs.model }}
                   EFFORT: ${{ inputs.effort }}
                   HOME: ${{ runner.temp }}/codex-review/home
@@ -335,7 +343,7 @@ jobs:
         name: Post the Codex review
         needs: review
         if: needs.review.result == 'success' && needs.review.outputs.review == 'true'
-        runs-on: [self-hosted, X64]
+        runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted", "X64"]') || 'ubuntu-latest' }}
         timeout-minutes: 30
         permissions:
             contents: write # The resolveReviewThread mutation fails without it.
