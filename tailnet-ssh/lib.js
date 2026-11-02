@@ -54,7 +54,6 @@ function sshConfig({ host, tailscale, socket, knownHostsCommand }) {
     `Host ${host}`,
     `    ProxyCommand "${tailscale}" --socket="${socket}" nc %h %p`,
     `    KnownHostsCommand "${knownHostsCommand}" %f %H %t %K`,
-    // The pins in gingerbread's github-deploy-targets.tf are ed25519 keys.
     "    HostKeyAlgorithms ssh-ed25519",
     "    StrictHostKeyChecking yes",
     "    UserKnownHostsFile /dev/null",

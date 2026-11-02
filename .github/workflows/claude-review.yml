@@ -37,8 +37,12 @@ jobs:
         # author_association is not checked: GitHub has reported the same
         # organization member as CONTRIBUTOR in one repository and MEMBER in
         # another.
+        #
+        # Pull requests in a public repository are not reviewed: anyone can
+        # comment on them, and the model can read every comment.
         if: >-
             contains(format(',{0},', vars.CODE_REVIEWS), ',claude,') &&
+            github.event.repository.private &&
             github.event_name == 'pull_request_target' &&
             github.event.pull_request.head.repo.full_name == github.repository &&
             !github.event.pull_request.draft

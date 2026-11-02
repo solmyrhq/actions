@@ -11,7 +11,7 @@ test("runner architectures are mapped to Tailscale's names, and unknown ones are
 });
 
 test("node names are DNS labels of at most 63 characters that end in the run ID, attempt and random part", () => {
-  assert.equal(lib.nodeHostname("solmyrhq/sheet.stream", "123", "2", "a1b2c3"), "gha-sheet-stream-123-2-a1b2c3");
+  assert.equal(lib.nodeHostname("solmyrhq/example.app", "123", "2", "a1b2c3"), "gha-example-app-123-2-a1b2c3");
   const long = lib.nodeHostname(`solmyrhq/${"a".repeat(100)}`, "123456789012", "1", "a1b2c3");
   assert.ok(long.length <= 63);
   assert.ok(long.endsWith("-123456789012-1-a1b2c3"));

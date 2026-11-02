@@ -113,12 +113,19 @@ test("code-review.yml calls review.yml by a local path on pull_request_target an
   assert.ok(CALLER.job("review").includes("\n        uses: ./.github/workflows/review.yml\n"));
 });
 
-test("code-review.yml grants the union of the permissions of review.yml's jobs, and passes every secret that review.yml accepts", () => {
+test("code-review.yml grants the union of the permissions of review.yml's jobs, and passes its secrets with secrets: inherit", () => {
   const needed = widest(Object.keys(REVIEWS).map((id) => DISPATCHER.permissions(id)));
   assert.deepEqual(CALLER.permissions("review"), needed);
-  const passed = jobBlock(CALLER.job("review"), "secrets");
-  assert.deepEqual(Object.keys(passed).sort(), declaredSecrets("review.yml"));
-  for (const [secret, value] of Object.entries(passed)) assert.equal(value, `\${{ secrets.${secret} }}`);
+  assert.match(CALLER.job("review"), /\n {8}secrets: inherit\n/);
+});
+
+test("the Claude and OpenCode reviews run only in private repositories, even when a caller calls their workflows directly", () => {
+  for (const name of ["claude-review.yml", "opencode-review.yml"]) {
+    assert.match(workflow(name).condition("review"), /&&\s+github\.event\.repository\.private &&/, `${name} also runs in a public repository`);
+  }
+  for (const id of Object.keys(REVIEWS)) {
+    assert.doesNotMatch(DISPATCHER.job(id), /\n {8}if: /, `review.yml skips ${id} itself`);
+  }
 });
 
 test("no workflow in this repository other than review.yml calls a review workflow", () => {

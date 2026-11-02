@@ -22,6 +22,8 @@ on:
                 required: false
             CLIPROXY_API_KEY:
                 required: false
+            CLIPROXY_BASE_URL:
+                required: false
             CODE_REVIEW_TS_OAUTH_SECRET:
                 required: false
 
@@ -50,6 +52,7 @@ jobs:
             guide: ${{ inputs.guide }}
         secrets:
             CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+            CLIPROXY_BASE_URL: ${{ secrets.CLIPROXY_BASE_URL }}
             CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
 
     opencode:

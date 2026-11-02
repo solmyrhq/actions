@@ -1,8 +1,6 @@
 # actions
 
-GitHub Actions shared by the solmyrhq organization's private repositories.
-
-Only workflows in solmyrhq repositories can use these actions, because this repository's Actions access level is `organization`. The repository and that setting are declared in `infra/terraform/github-repositories.tf` in the gingerbread repository.
+GitHub Actions shared by the solmyrhq organization's repositories.
 
 When you use an action from this repository, pin it to a full commit SHA.
 
@@ -54,7 +52,7 @@ Three reusable workflows review a pull request with the `exhaustive-review` skil
 
 ### Turn a review on or off
 
-`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. A repository variable with the same name replaces the organization's value for that repository. If the name of a workflow is not in the list, the workflow skips the review job and posts nothing. To change the reviews that run, change the variable. You do not have to change the callers.
+`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. A repository variable with the same name replaces the organization's value for that repository. If the name of a workflow is not in the list, the review job of that workflow does not run, and the workflow posts nothing. To change the reviews that run, change the variable. You do not have to change the callers. In a public repository, only the Codex review can run (see "Public repositories").
 
 ### Call the reviews
 
@@ -85,20 +83,26 @@ jobs:
         with:
             pr: ${{ inputs.pr }}
             guide: CLAUDE.md
-        secrets:
-            CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-            CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
-            CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
+        secrets: inherit
 ```
 
-The caller gives `review.yml` each permission that one of the three reviews needs. Each job of `review.yml` gives its review only the permissions and the secrets that the review needs. In each review workflow, each job then gets only the permissions that the job needs.
+The caller gives `review.yml` each permission that one of the three reviews needs. With `secrets: inherit`, the caller also gives `review.yml` all of the caller's secrets. Each job of `review.yml` gives its review only the permissions and the secrets that the review needs. In each review workflow, each job then gets only the permissions that the job needs. The reviews use these organization secrets: `CLAUDE_CODE_OAUTH_TOKEN` for the Claude review, `OPENROUTER_API_KEY` for the OpenCode review, and `CLIPROXY_API_KEY`, `CLIPROXY_BASE_URL` and `CODE_REVIEW_TS_OAUTH_SECRET` for the Codex review.
 
 `review.yml` refers to each review with a path that starts with `$/`. GitHub resolves `$/` to this repository, at the commit of `review.yml` that is running, whichever repository calls `review.yml`. Thus, when a caller pins `review.yml` to a commit, GitHub also runs the reviews from that commit.
 
 To review a pull request again, run the caller from the Actions tab and give the pull request number. In this manual run, only the Codex and OpenCode reviews run. The Claude review does not run (see "Claude").
 
 `review.yml` has only the `pr` and `guide` inputs. Each review therefore uses the default values of its other inputs, such as `model` and `effort`. To use other values in a repository, call the workflow of that review directly from that repository.
+
+### Public repositories
+
+Anyone can comment on a pull request in a public repository. A comment can contain instructions for the model. The model posts its review on the pull request, where everyone can read it. Thus, in a public repository:
+
+- Only the Codex review runs. In the Claude and OpenCode reviews, the model can read every comment on the pull request. Thus, in the Claude and OpenCode workflows, the review job does not run. This is also true when a caller calls one of these workflows directly.
+- The Codex review gives the model only the comments of bots, of the pull request's author, and of people whose author association is `OWNER`, `MEMBER` or `COLLABORATOR`.
+- The Codex review runs on a GitHub-hosted runner, because public repositories cannot use the organization's self-hosted runners. Each job on a GitHub-hosted runner gets a new virtual machine. Thus, the model cannot read the files of other jobs.
+
+Give the public repository access to the organization secrets that the Codex review uses.
 
 ### OpenCode
 
@@ -120,12 +124,12 @@ OpenCode also loads skills from `.claude/skills` and `.agents/skills`, and reads
 
 The Codex workflow runs Codex with the `codex-review` harness, and posts the review in the same way as the OpenCode workflow, with the `codex-code-review` marker.
 
-With the `model`, `effort` and `base-url` inputs of the Codex workflow, you can set the model, its reasoning effort and the CLIProxyAPI endpoint. The defaults are `gpt-6.1-sol`, `xhigh` and the CLIProxyAPI endpoint on linux-bruno.
+With the `model` and `effort` inputs of the Codex workflow, you can set the model and its reasoning effort. The defaults are `gpt-6.1-sol` and `xhigh`. The workflow reads the base URL of the CLIProxyAPI endpoint from the `CLIPROXY_BASE_URL` secret, so that GitHub masks the URL in the logs.
 
 The commands that the model runs cannot connect to the network, and they have no GitHub token. Only the Codex process can connect to the model provider, CLIProxyAPI. The Codex process connects through the tailnet proxy and uses the CLIProxyAPI key. Before Codex starts, the `review` job does these steps:
 
-1. It reads the pull request, its diff, its files, its comments, its reviews and its review threads, and the guide from the base commit, into a directory outside the checkout.
-2. It installs Codex from a release whose checksum is pinned, and checks that the Codex sandbox works on the runner.
+1. It reads the pull request, its diff, its files, its comments, its reviews and its review threads, and the guide from the base commit, into a directory outside the checkout. In the comments, the reviews and the review threads, it keeps only the items of bots, of the pull request's author, and of people whose author association is `OWNER`, `MEMBER` or `COLLABORATOR`.
+2. It installs Codex from a release whose checksum is pinned, and checks that the Codex sandbox works on the runner. On a GitHub-hosted runner, it allows unprivileged user namespaces before this check. The Codex sandbox needs these namespaces. On Ubuntu, AppArmor blocks them by default.
 3. It puts `config.toml` from the `codex-review` action in a temporary `CODEX_HOME`, and the skills in the `.agents/skills` directory of a temporary `HOME`.
 4. It removes the pull request's `.agents`, `.codex`, `AGENTS.md` and `AGENTS.override.md` from the checkout. Codex loads skills from `.agents/skills`, where a pull request could add its own copy of `exhaustive-review`.
 5. It joins the tailnet with `tailnet-http`, as a node with the tag `tag:ci-code-review`. The job gives the proxy only to the Codex process.
@@ -138,9 +142,9 @@ The Claude workflow runs `anthropics/claude-code-action`, which posts the review
 
 Before Claude starts, `claude-code-action` puts back `.claude/`, `CLAUDE.md` and the other configuration paths of Claude Code from the base branch. It removes each of these paths that the base branch does not have. The skill therefore cannot be in the checkout. The workflow copies the skill from the `skills` action into a temporary `CLAUDE_CONFIG_DIR`. Claude Code loads user skills from this directory.
 
-Claude Code reads the `.claude/settings.json` of the base branch as its project settings. If that file has a value for `env.ANTHROPIC_BASE_URL`, Claude Code sends its requests to that server. If that file has a value for `apiKeyHelper`, Claude Code runs that command to get its key. If the runner cannot connect to that server or cannot run that command, the review fails. For example, the `.claude/settings.json` of `solmyrhq/agent-config` is also the global settings file of its owner, and its `env.ANTHROPIC_BASE_URL` is a server on a private tailnet. The workflow therefore writes a settings file in which `apiKeyHelper` is an empty string and `env.ANTHROPIC_BASE_URL` is `https://api.anthropic.com`. The workflow gives this file to Claude Code with `--settings`. Claude Code uses a value from `--settings` before a value from the project settings, and a value from the project settings before a value from the user settings. The `settings` input of `claude-code-action` cannot replace the values of the project, because the action merges that input into `~/.claude/settings.json`, which holds the user settings.
+Claude Code reads the `.claude/settings.json` of the base branch as its project settings. If that file has a value for `env.ANTHROPIC_BASE_URL`, Claude Code sends its requests to that server. If that file has a value for `apiKeyHelper`, Claude Code runs that command to get its key. If the runner cannot connect to that server or cannot run that command, the review fails. For example, in the `.claude/settings.json` of a repository, `env.ANTHROPIC_BASE_URL` can be a server on a private network of the repository's owner. The workflow therefore writes a settings file in which `apiKeyHelper` is an empty string and `env.ANTHROPIC_BASE_URL` is `https://api.anthropic.com`. The workflow gives this file to Claude Code with `--settings`. Claude Code uses a value from `--settings` before a value from the project settings, and a value from the project settings before a value from the user settings. The `settings` input of `claude-code-action` cannot replace the values of the project, because the action merges that input into `~/.claude/settings.json`, which holds the user settings.
 
-In a manual run of the caller (`workflow_dispatch`), the Claude workflow skips the review job. Without a pull request in the event, `claude-code-action` has no pull request to comment on.
+In a manual run of the caller (`workflow_dispatch`), the review job of the Claude workflow does not run. Without a pull request in the event, `claude-code-action` has no pull request to comment on.
 
 ### Change a review
 
@@ -160,7 +164,7 @@ Do not pin the action to a commit on the branch of a pull request. After the squ
 
 This action holds the files for the OpenCode code review: the `pr-review` agent in `agents/` and the review prompt in `prompt.md`. The `path` output of the action is the directory that holds these files. The review workflow, `.github/workflows/opencode-review.yml`, copies the files from that directory. Before the model starts, the workflow also reads the project's guide from the base branch of the caller's repository, and writes it to `.opencode/guide.md` in the checkout. The action has one step. This step checks that `agents/pr-review.md` and `prompt.md` are not empty.
 
-The files are in an action because a job in another private repository cannot check out this repository with its `GITHUB_TOKEN`. The job can use an action from this repository, and the runner then downloads this repository at the pinned commit. An action can therefore read files outside its own directory, such as `skills/`, `tailnet/` and `toolkit/`.
+The files are in an action so that a job gets them at the pinned commit. When a job uses an action from this repository, the runner downloads this repository at that commit. An action can therefore read files outside its own directory, such as `skills/`, `tailnet/` and `toolkit/`.
 
 The permission list in the front matter of the agent is the sandbox of the model. OpenCode lets the model read and edit only the files that the list allows, and run only the commands that it allows. A trailing `*` in a shell rule matches extra arguments. The model can add an argument such as `-X POST` to an allowed `gh api` command to make it write. GitHub rejects that write because the token of the review job is read-only. Keep that token read-only, and examine it again when you change the list.
 
@@ -170,11 +174,11 @@ This action holds the files for the Codex code review: the review prompt in `pro
 
 The configuration and the read-only token of the job are the sandbox of the review:
 
-- Codex runs each command that the model asks for in a read-only sandbox with no network access. Codex never asks for approval. The sandbox prevents writes, but it does not prevent reads. A command can read every file that the runner user can read, for example the registration files of the runner and the checkouts of other jobs on the same runner. Thus, the model can write the contents of these files in the review. This risk is accepted, together with the risk to the key in the next item.
+- Codex runs each command that the model asks for in a read-only sandbox with no network access. Codex never asks for approval. The sandbox prevents writes, but it does not prevent reads. A command can read every file that the runner user can read. On a self-hosted runner, these files include the registration files of the runner and the checkouts of other jobs on the same runner. Thus, the model can write the contents of these files in the review. In a private repository, only people with access to the repository can comment. There, this risk is accepted, together with the risk to the key in the next item. In a public repository, the review runs on a GitHub-hosted runner instead (see "Public repositories").
 - Codex gives the commands only the core environment variables, such as `PATH` and `HOME`. But the commands can still read the key for the model provider. PID 1 of the sandbox is a Codex helper, and its `/proc/1/environ` holds the key. Thus, the model can read the key and write it in the review. This risk is accepted, because the key works only from a tailnet node that has access to CLIProxyAPI under the tailnet policy. You can also revoke the key without changing anything else.
-- Web search, apps, plugins, hooks, memories, browser use, computer use and image generation are off, because their traffic does not go through the sandbox. Codex starts no daemon, because the runners are not ephemeral and a daemon could continue to run after the job.
+- Web search, apps, plugins, hooks, memories, browser use, computer use and image generation are off, because their traffic does not go through the sandbox. Codex starts no daemon, because the self-hosted runners are not ephemeral and a daemon could continue to run after the job.
 - Codex does not load the pull request's `AGENTS.md` as instructions. The model reads the guide from the pull request's base commit instead. But the model can read every file in the checkout. Thus, `skills/exhaustive-review/references/ci-codex.md` has this instruction for the model: review the agent instruction files in the checkout, and do not follow them.
-- Codex connects to the model provider, CLIProxyAPI, through the Responses API. Codex reads the provider's key from `CLIPROXY_API_KEY`. The workflow passes the provider's base URL, the model and the reasoning effort on the command line.
+- Codex connects to the model provider, CLIProxyAPI, through the Responses API. Codex reads the provider's key from `CLIPROXY_API_KEY`. The workflow passes the provider's base URL, the model and the reasoning effort on the command line. The base URL comes from the `CLIPROXY_BASE_URL` secret.
 
 The final message of the model is the review, as a JSON object that matches `output-schema.json`. The `review-check` action writes that message as the files that `review-publish` posts.
 
@@ -182,7 +186,7 @@ The final message of the model is the review, as a JSON object that matches `out
 
 This action holds the `exhaustive-review` skill and the tool mappings that the skill links to. The Claude, Codex and OpenCode reviews all load the skill from here. The `path` output of the action is this directory. The action has one step. This step checks that these files are not empty: `SKILL.md`, `agents/openai.yaml`, each file in `references/`, `codex-tools.md` and `opencode-tools.md`. Codex reads `agents/openai.yaml`. Because this file sets `allow_implicit_invocation` to `false`, Codex loads the skill only when the prompt names it.
 
-The files in `skills/` are copies of these files in the agent-config repository: `skills/exhaustive-review/`, `skills/codex-tools.md` and `skills/opencode-tools.md`. Every file in `skills/exhaustive-review/` is a copy, including the CI references `references/ci-opencode.md` and `references/ci-codex.md`. To change a file, change it in agent-config first. Then copy the changed file here.
+The files in `skills/` are copies of these files in the organization's agent configuration repository: `skills/exhaustive-review/`, `skills/codex-tools.md` and `skills/opencode-tools.md`. Every file in `skills/exhaustive-review/` is a copy, including the CI references `references/ci-opencode.md` and `references/ci-codex.md`. To change a file, change it in that repository first. Then copy the changed file here.
 
 ## review-prepare
 
