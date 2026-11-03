@@ -52,7 +52,23 @@ Three reusable workflows review a pull request with the `exhaustive-review` skil
 
 ### Turn a review on or off
 
-`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. A repository variable with the same name replaces the organization's value for that repository. If the name of a workflow is not in the list, the review job of that workflow does not run, and the workflow posts nothing. To change the reviews that run, change the variable. You do not have to change the callers. In a public repository, only the Codex review can run (see "Public repositories").
+`CODE_REVIEWS` is an organization variable. Its value is the list of reviews to run, from the names `claude`, `codex` and `opencode`. Separate the names with commas and no spaces, as in `claude,codex`. If a repository has a variable with the same name, GitHub uses the value of the repository variable in that repository. If the name of a workflow is not in the list, the review job of that workflow does not run, and the workflow posts nothing. To change the reviews that run, change the variable. You do not have to change the callers. In a public repository, only the Codex review can run (see "Public repositories").
+
+### Choose the model
+
+Set the model and the reasoning effort of each review with organization variables. If a repository has a variable with the same name, GitHub uses the value of the repository variable in that repository. If a variable is not set, the workflow uses the default value in the table.
+
+| Review   | Model variable          | Effort variable          | Default model                       | Default effort |
+| -------- | ----------------------- | ------------------------ | ----------------------------------- | -------------- |
+| Claude   | `CLAUDE_REVIEW_MODEL`   | `CLAUDE_REVIEW_EFFORT`   | `claude-opus-5-5`                   | `high`         |
+| Codex    | `CODEX_REVIEW_MODEL`    | `CODEX_REVIEW_EFFORT`    | `gpt-6.1-sol`                       | `max`          |
+| OpenCode | `OPENCODE_REVIEW_MODEL` | `OPENCODE_REVIEW_EFFORT` | `deepseek/deepseek-v4.1-flash-1017` | `max`          |
+
+For the OpenCode model, use an OpenRouter model ID without the `openrouter/` prefix. For the OpenCode effort, use the name of an OpenCode model variant.
+
+Each review workflow also has `model` and `effort` inputs. If an input has a value, the workflow uses that value instead of the variable. `review.yml` does not pass these inputs. To set these inputs in a repository, call the workflow of that review directly from that repository.
+
+Each workflow stops with an error if a model or an effort contains a character other than a letter, a digit, `.`, `_`, `/`, `:` or `-`. In the Claude workflow, a model or an effort can also contain `[` and `]`, as in `claude-opus-5-5[1m]`.
 
 ### Call the reviews
 
@@ -92,8 +108,6 @@ The caller gives `review.yml` each permission that one of the three reviews need
 
 To review a pull request again, run the caller from the Actions tab and give the pull request number. In this manual run, only the Codex and OpenCode reviews run. The Claude review does not run (see "Claude").
 
-`review.yml` has only the `pr` and `guide` inputs. Each review therefore uses the default values of its other inputs, such as `model` and `effort`. To use other values in a repository, call the workflow of that review directly from that repository.
-
 ### Public repositories
 
 Anyone can comment on a pull request in a public repository. A comment can contain instructions for the model. The model posts its review on the pull request, where everyone can read it. Thus, in a public repository:
@@ -124,7 +138,7 @@ OpenCode also loads skills from `.claude/skills` and `.agents/skills`, and reads
 
 The Codex workflow runs Codex with the `codex-review` harness, and posts the review in the same way as the OpenCode workflow, with the `codex-code-review` marker.
 
-With the `model` and `effort` inputs of the Codex workflow, you can set the model and its reasoning effort. The defaults are `gpt-6.1-sol` and `xhigh`. The workflow reads the base URL of the CLIProxyAPI endpoint from the `CLIPROXY_BASE_URL` secret, so that GitHub masks the URL in the logs.
+To set the model and its reasoning effort, see "Choose the model". The workflow reads the base URL of the CLIProxyAPI endpoint from the `CLIPROXY_BASE_URL` secret, so that GitHub masks the URL in the logs.
 
 The commands that the model runs cannot connect to the network, and they have no GitHub token. Only the Codex process can connect to the model provider, CLIProxyAPI. The Codex process connects through the tailnet proxy and uses the CLIProxyAPI key. Before Codex starts, the `review` job does these steps:
 

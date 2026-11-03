@@ -14,6 +14,22 @@ on:
                     the pull request's base commit.
                 type: string
                 default: CLAUDE.md
+            model:
+                description: >-
+                    OpenRouter model for the review, without the openrouter/
+                    prefix. If this input is empty, the workflow uses the
+                    OPENCODE_REVIEW_MODEL variable. If that variable is not
+                    set, the workflow uses deepseek/deepseek-v4.1-flash-1017.
+                type: string
+                default: ""
+            effort:
+                description: >-
+                    Reasoning effort for the review, as the name of an OpenCode
+                    model variant. If this input is empty, the workflow uses
+                    the OPENCODE_REVIEW_EFFORT variable. If that variable is
+                    not set, the workflow uses max.
+                type: string
+                default: ""
         secrets:
             OPENROUTER_API_KEY:
                 required: true
@@ -184,6 +200,8 @@ jobs:
                   REPOSITORY: ${{ github.repository }}
                   HEAD_SHA: ${{ steps.prepare.outputs.head-sha }}
                   HARNESS: ${{ steps.harness.outputs.path }}
+                  MODEL: ${{ inputs.model || vars.OPENCODE_REVIEW_MODEL || 'deepseek/deepseek-v4.1-flash-1017' }}
+                  EFFORT: ${{ inputs.effort || vars.OPENCODE_REVIEW_EFFORT || 'max' }}
                   HOME: ${{ runner.temp }}/opencode-home
                   XDG_CONFIG_HOME: ${{ runner.temp }}/opencode-home/config
                   XDG_DATA_HOME: ${{ runner.temp }}/opencode-home/data
@@ -195,6 +213,14 @@ jobs:
                   OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
                   OPENCODE_DISABLE_CLAUDE_CODE: "1"
               run: |
+                  for value in "$MODEL" "$EFFORT"; do
+                      case "$value" in
+                          '' | *[!A-Za-z0-9._/:-]*)
+                              echo "The model or the reasoning effort contains a character that is not allowed." >&2
+                              exit 1
+                              ;;
+                      esac
+                  done
                   mkdir -p "$HOME" "$XDG_CONFIG_HOME/opencode" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
                   key_file="$RUNNER_TEMP/opencode-secrets/openrouter-key"
                   # shellcheck disable=SC2016 # "$schema" is a JSON key, and $key is a jq variable.
@@ -206,7 +232,7 @@ jobs:
                       --standalone \
                       --auto \
                       --agent pr-review \
-                      --model 'openrouter/deepseek/deepseek-v4.1-flash-1017#max' \
+                      --model "openrouter/$MODEL#$EFFORT" \
                       "$prompt"
 
             - name: Restore the reviewed files

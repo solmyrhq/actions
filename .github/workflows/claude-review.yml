@@ -4,13 +4,19 @@ on:
     workflow_call:
         inputs:
             model:
-                description: Model for the review.
+                description: >-
+                    Model for the review. If this input is empty, the workflow
+                    uses the CLAUDE_REVIEW_MODEL variable. If that variable is
+                    not set, the workflow uses claude-opus-5-5.
                 type: string
-                default: claude-opus-5-5
+                default: ""
             effort:
-                description: Reasoning effort for the review.
+                description: >-
+                    Reasoning effort for the review. If this input is empty,
+                    the workflow uses the CLAUDE_REVIEW_EFFORT variable. If
+                    that variable is not set, the workflow uses high.
                 type: string
-                default: high
+                default: ""
         secrets:
             CLAUDE_CODE_OAUTH_TOKEN:
                 required: true
@@ -63,6 +69,26 @@ jobs:
             - name: Clear claude-code-action's inline-comment buffer
               timeout-minutes: 1
               run: rm -f /tmp/inline-comments-buffer.jsonl
+
+            - name: Choose the model
+              id: model
+              timeout-minutes: 1
+              env:
+                  MODEL: ${{ inputs.model || vars.CLAUDE_REVIEW_MODEL || 'claude-opus-5-5' }}
+                  EFFORT: ${{ inputs.effort || vars.CLAUDE_REVIEW_EFFORT || 'high' }}
+              run: |
+                  pattern='^[][A-Za-z0-9._/:-]+$'
+                  for value in "$MODEL" "$EFFORT"; do
+                      if ! [[ "$value" =~ $pattern ]]; then
+                          echo "The model or the reasoning effort contains a character that is not allowed." >&2
+                          exit 1
+                      fi
+                  done
+                  echo "The review uses $MODEL with $EFFORT reasoning effort."
+                  {
+                      echo "model=$MODEL"
+                      echo "effort=$EFFORT"
+                  } >> "$GITHUB_OUTPUT"
 
             # Before Claude starts, claude-code-action restores .claude/,
             # CLAUDE.md and Claude Code's other configuration paths from the
@@ -128,8 +154,8 @@ jobs:
                   # agent mode, and starts the inline-comment and CI MCP
                   # servers only when their tools are listed in --allowedTools.
                   claude_args: |
-                      --model ${{ inputs.model }}
-                      --effort ${{ inputs.effort }}
+                      --model ${{ steps.model.outputs.model }}
+                      --effort ${{ steps.model.outputs.effort }}
                       --settings ${{ steps.config.outputs.settings }}
                       --allowedTools
                       "Read"

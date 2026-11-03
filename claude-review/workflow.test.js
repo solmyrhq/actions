@@ -58,6 +58,17 @@ test("the checkout keeps no credentials, and the app token is removed from it ev
   assert.match(review("Remove the app token from the checkout"), /if: always\(\)/);
 });
 
+test("the model and effort are taken from the caller's input, then from the CLAUDE_REVIEW_* variables, and default to claude-opus-5-5 and high", () => {
+  const choose = review("Choose the model");
+  assert.ok(choose.includes("MODEL: ${{ inputs.model || vars.CLAUDE_REVIEW_MODEL || 'claude-opus-5-5' }}"));
+  assert.ok(choose.includes("EFFORT: ${{ inputs.effort || vars.CLAUDE_REVIEW_EFFORT || 'high' }}"));
+  assert.ok(choose.includes(`pattern='^[][A-Za-z0-9._/:-]+$'`), "claude-code-action would split a value with a space into more options in claude_args");
+  const run = review("Review the pull request");
+  assert.match(run, /\n {22}--model \$\{\{ steps\.model\.outputs\.model \}\}\n/);
+  assert.match(run, /\n {22}--effort \$\{\{ steps\.model\.outputs\.effort \}\}\n/);
+  assert.doesNotMatch(TEXT, /inputs\.(model|effort) \}\}/, "a step uses inputs.model or inputs.effort without the variables as a fallback");
+});
+
 test("Claude may run only read commands and the comment tools", () => {
   const run = review("Review the pull request");
   assert.doesNotMatch(run, /"Bash\((?!gh pr view|gh pr diff|gh pr comment|gh api )/);

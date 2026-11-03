@@ -74,6 +74,17 @@ test("the model gets only the comments of bots, of the pull request's author and
   assert.match(read, /\.comments\.nodes \|= map\(select\(\.author\.__typename == "Bot" or \.author\.login == \$author or \(\.authorAssociation \| IN\("OWNER", "MEMBER", "COLLABORATOR"\)\)\)\)/);
 });
 
+test("the model and effort are taken from the caller's input, then from the CODEX_REVIEW_* variables, and default to gpt-6.1-sol and max", () => {
+  const choose = review("Choose the model");
+  assert.ok(choose.includes("MODEL: ${{ inputs.model || vars.CODEX_REVIEW_MODEL || 'gpt-6.1-sol' }}"));
+  assert.ok(choose.includes("EFFORT: ${{ inputs.effort || vars.CODEX_REVIEW_EFFORT || 'max' }}"));
+  assert.ok(choose.includes(`pattern='^[A-Za-z0-9._/:-]+$'`), "Codex would read a quote in a value as the end of its TOML string");
+  const run = review("Review the pull request");
+  assert.match(run, /MODEL: \$\{\{ steps\.model\.outputs\.model \}\}\n/);
+  assert.match(run, /EFFORT: \$\{\{ steps\.model\.outputs\.effort \}\}\n/);
+  assert.doesNotMatch(TEXT, /\n {16}default: (gpt|xhigh|max)/, "with an input default, the workflow never uses the variables");
+});
+
 test("the step that runs Codex holds no GitHub token", () => {
   assert.doesNotMatch(review("Review the pull request"), /GH_TOKEN|GITHUB_TOKEN|github\.token/);
 });
