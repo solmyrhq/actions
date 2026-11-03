@@ -24,6 +24,15 @@ test("the review runs only when CODE_REVIEWS lists opencode", () => {
   assert.ok(condition("review").includes("contains(format(',{0},', vars.CODE_REVIEWS), ',opencode,')"));
 });
 
+test("the model and effort are taken from the caller's input, then from the OPENCODE_REVIEW_* variables, and default to deepseek/deepseek-v4.1-flash-1017 and max", () => {
+  const run = review("Review the pull request");
+  assert.ok(run.includes("MODEL: ${{ inputs.model || vars.OPENCODE_REVIEW_MODEL || 'deepseek/deepseek-v4.1-flash-1017' }}"));
+  assert.ok(run.includes("EFFORT: ${{ inputs.effort || vars.OPENCODE_REVIEW_EFFORT || 'max' }}"));
+  assert.ok(run.includes('--model "openrouter/$MODEL#$EFFORT"'));
+  assert.ok(run.includes("'' | *[!A-Za-z0-9._/:-]*)"), "a # in a value would change the variant that OpenCode reads");
+  assert.ok(run.indexOf("*[!A-Za-z0-9._/:-]*") < run.indexOf('opencode" run'), "OpenCode starts before the values are checked");
+});
+
 test("the OpenRouter key reaches only the step that writes it to a file", () => {
   const uses = TEXT.match(/secrets\.OPENROUTER_API_KEY/g) ?? [];
   assert.equal(uses.length, 1);

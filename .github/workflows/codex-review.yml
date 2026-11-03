@@ -15,13 +15,20 @@ on:
                 type: string
                 default: CLAUDE.md
             model:
-                description: Model for the review and its sub-agents.
+                description: >-
+                    Model for the review and its sub-agents. If this input is
+                    empty, the workflow uses the CODEX_REVIEW_MODEL variable.
+                    If that variable is not set, the workflow uses gpt-6.1-sol.
                 type: string
-                default: gpt-6.1-sol
+                default: ""
             effort:
-                description: Reasoning effort for the review and its sub-agents.
+                description: >-
+                    Reasoning effort for the review and its sub-agents. If this
+                    input is empty, the workflow uses the CODEX_REVIEW_EFFORT
+                    variable. If that variable is not set, the workflow uses
+                    max.
                 type: string
-                default: xhigh
+                default: ""
         secrets:
             CLIPROXY_API_KEY:
                 required: true
@@ -73,6 +80,27 @@ jobs:
                   token: ${{ github.token }}
                   pr: ${{ github.event.pull_request.number || inputs.pr }}
                   artifact-prefix: codex-review
+
+            - name: Choose the model
+              id: model
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 1
+              env:
+                  MODEL: ${{ inputs.model || vars.CODEX_REVIEW_MODEL || 'gpt-6.1-sol' }}
+                  EFFORT: ${{ inputs.effort || vars.CODEX_REVIEW_EFFORT || 'max' }}
+              run: |
+                  pattern='^[A-Za-z0-9._/:-]+$'
+                  for value in "$MODEL" "$EFFORT"; do
+                      if ! [[ "$value" =~ $pattern ]]; then
+                          echo "The model or the reasoning effort contains a character that is not allowed." >&2
+                          exit 1
+                      fi
+                  done
+                  echo "The review uses $MODEL with $EFFORT reasoning effort."
+                  {
+                      echo "model=$MODEL"
+                      echo "effort=$EFFORT"
+                  } >> "$GITHUB_OUTPUT"
 
             - name: Check out the pull request
               id: checkout
@@ -246,8 +274,8 @@ jobs:
                   REPOSITORY: ${{ github.repository }}
                   HEAD_SHA: ${{ steps.prepare.outputs.head-sha }}
                   BASE_URL: ${{ secrets.CLIPROXY_BASE_URL }}
-                  MODEL: ${{ inputs.model }}
-                  EFFORT: ${{ inputs.effort }}
+                  MODEL: ${{ steps.model.outputs.model }}
+                  EFFORT: ${{ steps.model.outputs.effort }}
                   HOME: ${{ runner.temp }}/codex-review/home
                   CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
                   # Under the shell_environment_policy in config.toml, Codex
