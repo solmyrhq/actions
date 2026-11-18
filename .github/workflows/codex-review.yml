@@ -115,7 +115,7 @@ jobs:
             - name: Get the review harness
               id: harness
               if: steps.prepare.outputs.review == 'true'
-              uses: solmyrhq/actions/codex-review@9893d8eac03120a797314d7c4b2b38a9170b03a6
+              uses: solmyrhq/actions/codex-review@f56723af8363573ce7e0fa375f686595dcf540d7
 
             - name: Get the review skills
               id: skills
