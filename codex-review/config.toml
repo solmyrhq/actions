@@ -3,10 +3,9 @@
 
 model_provider = "cliproxy"
 approval_policy = "never"
-# The review profile at the end of this file. Codex ignores default_permissions
-# when exec gets --sandbox, or when a config layer with a higher precedence
-# than this file sets sandbox_mode, such as a -c option or a project's
-# .codex/config.toml.
+# Codex ignores this when exec gets --sandbox, or when a config layer above
+# this file, such as a -c option or a project's .codex/config.toml, sets
+# sandbox_mode.
 default_permissions = "review"
 web_search = "disabled"
 check_for_update_on_startup = false
@@ -59,9 +58,7 @@ supports_websockets = false
 [permissions.review]
 extends = ":read-only"
 
-# The jobs of every repository on a self-hosted runner fill the runner user's
-# Bun install cache, and in November 2026 a review's command loaded packages
-# from it. The workflow appends the deny rule for that cache to this table,
-# with the full path from the runner user's HOME. A `~` here would point into
-# the temporary HOME that Codex runs with. Keep this table last.
+# The workflow appends a deny rule for the runner user's Bun install cache,
+# which every repository's jobs fill. A `~` here would point into the
+# temporary HOME that Codex runs with.
 [permissions.review.filesystem]

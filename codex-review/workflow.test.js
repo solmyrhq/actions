@@ -97,8 +97,6 @@ test("Codex runs with an exact configuration, no session files and no project ru
   assert.doesNotMatch(run, /dangerously|--add-dir|workspace-write|danger-full-access/);
 });
 
-// With --sandbox, Codex ignores default_permissions, and the model's commands
-// could read the runner's Bun install cache.
 test("Codex exec takes its sandbox from the review profile, not from --sandbox", () => {
   assert.doesNotMatch(review("Review the pull request"), /--sandbox\b/);
 });

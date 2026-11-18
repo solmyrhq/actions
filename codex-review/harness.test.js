@@ -31,14 +31,13 @@ test("commands run under the review profile, which extends the read-only one, an
 });
 
 // Codex 0.165.0 prefers default_permissions to a sandbox_mode in the same
-// file. A sandbox_mode here would still suggest to a reader that it sets the
-// sandbox.
+// file, so a sandbox_mode here would only mislead a reader.
 test("no sandbox_mode replaces the review profile", () => {
   assert.doesNotMatch(CONFIG, /^sandbox_mode\b/m);
 });
 
-// The workflow appends the deny rule for the runner's Bun install cache, whose
-// path depends on the runner user's home, to the end of the file.
+// The workflow appends the deny rule for the Bun install cache to the end of
+// the file.
 test("the review profile's filesystem table is the last table in the file", () => {
   const tables = CONFIG.split("\n").filter((line) => line.startsWith("["));
   assert.equal(tables.at(-1), "[permissions.review.filesystem]");

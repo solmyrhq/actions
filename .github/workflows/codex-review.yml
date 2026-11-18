@@ -207,9 +207,6 @@ jobs:
               timeout-minutes: 1
               run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-            # This step does not set HOME, and $HOME is the runner user's own.
-            # Only the step that runs the review gives Codex the temporary HOME
-            # that this step makes.
             - name: Set up Codex
               id: setup
               if: steps.prepare.outputs.review == 'true'
@@ -227,11 +224,6 @@ jobs:
                   # SKILL.md links to ../codex-tools.md.
                   cp "$SKILLS/codex-tools.md" "$home/.agents/skills/codex-tools.md"
 
-            # Codex runs the model's commands in bubblewrap, which needs
-            # unprivileged user namespaces on the runner. The sandbox is checked
-            # in an empty directory because Codex reads project configuration
-            # from .codex/, and the checkout's .codex/ comes from the pull
-            # request.
             - name: Check the Codex sandbox
               id: sandbox
               if: steps.prepare.outputs.review == 'true'
