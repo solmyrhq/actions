@@ -89,12 +89,24 @@ test("the step that runs Codex holds no GitHub token", () => {
   assert.doesNotMatch(review("Review the pull request"), /GH_TOKEN|GITHUB_TOKEN|github\.token/);
 });
 
-test("Codex runs read-only, with an exact configuration, no session files and no project rules", () => {
+test("Codex runs with an exact configuration, no session files and no project rules", () => {
   const run = review("Review the pull request");
-  for (const flag of ["--strict-config", "--ephemeral", "--ignore-rules", "--sandbox read-only", "--output-schema", "--output-last-message"]) {
+  for (const flag of ["--strict-config", "--ephemeral", "--ignore-rules", "--output-schema", "--output-last-message"]) {
     assert.ok(run.includes(flag), `codex exec is not given ${flag}`);
   }
   assert.doesNotMatch(run, /dangerously|--add-dir|workspace-write|danger-full-access/);
+});
+
+// With --sandbox, Codex ignores default_permissions, and the model's commands
+// could read the runner's Bun install cache.
+test("Codex exec takes its sandbox from the review profile, not from --sandbox", () => {
+  assert.doesNotMatch(review("Review the pull request"), /--sandbox\b/);
+});
+
+test("the review profile denies the model's commands the runner's own Bun install cache", () => {
+  const setup = review("Set up Codex");
+  assert.ok(setup.includes(`printf '"%s" = "deny"\\n' "$HOME/.bun/install/cache" >> "$home/.codex/config.toml"`));
+  assert.doesNotMatch(setup, /\n {18}HOME:/, "the step must read the runner user's own HOME");
 });
 
 test("Codex and its skills live under a temporary HOME, outside the checkout", () => {
@@ -121,12 +133,20 @@ test("the pull request's agent files are removed for the run and restored from t
   assert.match(restore, /\n {14}if: always\(\) && steps\.prepare\.outputs\.review == 'true'\n/, "the files are not restored after a failed review");
 });
 
-test("the sandbox is checked before the model starts, outside the pull request's checkout", () => {
+test("the review profile is checked after it is set up and before the model starts, outside the pull request's checkout", () => {
+  assert.ok(TEXT.indexOf("- name: Set up Codex") < TEXT.indexOf("- name: Check the Codex sandbox"));
   assert.ok(TEXT.indexOf("- name: Check the Codex sandbox") < TEXT.indexOf("- name: Review the pull request"));
   const check = review("Check the Codex sandbox");
-  assert.match(check, /"\$CODEX" sandbox --permission-profile :read-only -C "\$empty" -- true/);
+  assert.match(check, /"\$CODEX" sandbox --permission-profile review -C "\$empty" -- true/);
   assert.ok(check.includes('empty="$RUNNER_TEMP/codex-review/sandbox-check"'));
   assert.doesNotMatch(check, /GITHUB_WORKSPACE/);
+});
+
+test("the review fails when the sandbox can list the runner's Bun install cache", () => {
+  const check = review("Check the Codex sandbox");
+  assert.ok(check.includes('cache="$HOME/.bun/install/cache"'));
+  assert.ok(check.includes('"$CODEX" sandbox --permission-profile review -C "$empty" -- ls -A "$cache"'));
+  assert.match(check, /\n {22}exit 1\n/);
 });
 
 test("Codex is installed from a pinned release whose checksum is checked", () => {

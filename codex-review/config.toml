@@ -3,7 +3,9 @@
 
 model_provider = "cliproxy"
 approval_policy = "never"
-sandbox_mode = "read-only"
+# The review profile below. Codex ignores default_permissions when any config
+# file sets sandbox_mode, or when exec is given --sandbox.
+default_permissions = "review"
 web_search = "disabled"
 check_for_update_on_startup = false
 
@@ -51,3 +53,13 @@ wire_api = "responses"
 # Codex reaches the provider through the tailnet-http action's proxy, and it is
 # not known whether Codex's WebSocket client uses a proxy.
 supports_websockets = false
+
+[permissions.review]
+extends = ":read-only"
+
+# The jobs of every repository on a self-hosted runner fill the runner user's
+# Bun install cache, and a review's commands once loaded packages from it. The
+# workflow appends a deny rule for that cache here, because its path depends on
+# the runner user's home, and the model's commands run with another HOME. Keep
+# this table last.
+[permissions.review.filesystem]

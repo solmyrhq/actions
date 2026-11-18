@@ -207,24 +207,8 @@ jobs:
               timeout-minutes: 1
               run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-            # Codex runs the model's commands in bubblewrap, which needs
-            # unprivileged user namespaces on the runner. The sandbox is checked
-            # in an empty directory because Codex reads project configuration
-            # from .codex/, and the checkout's .codex/ comes from the pull
-            # request. On Linux, `codex sandbox` requires a permission profile;
-            # :read-only matches the review's sandbox_mode.
-            - name: Check the Codex sandbox
-              id: sandbox
-              if: steps.prepare.outputs.review == 'true'
-              timeout-minutes: 2
-              env:
-                  CODEX: ${{ steps.install.outputs.codex }}
-                  CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
-              run: |
-                  empty="$RUNNER_TEMP/codex-review/sandbox-check"
-                  mkdir -p "$CODEX_HOME" "$empty"
-                  "$CODEX" sandbox --permission-profile :read-only -C "$empty" -- true
-
+            # HOME here is the runner user's own. The steps after this one give
+            # Codex and the model's commands the temporary HOME below.
             - name: Set up Codex
               id: setup
               if: steps.prepare.outputs.review == 'true'
@@ -236,9 +220,33 @@ jobs:
                   home="$RUNNER_TEMP/codex-review/home"
                   mkdir -p "$home/.codex" "$home/.agents/skills" "$RUNNER_TEMP/codex-review/output"
                   cp "$HARNESS/config.toml" "$home/.codex/config.toml"
+                  # config.toml ends with the review profile's filesystem table.
+                  printf '"%s" = "deny"\n' "$HOME/.bun/install/cache" >> "$home/.codex/config.toml"
                   cp -R "$SKILLS/exhaustive-review" "$home/.agents/skills/exhaustive-review"
                   # SKILL.md links to ../codex-tools.md.
                   cp "$SKILLS/codex-tools.md" "$home/.agents/skills/codex-tools.md"
+
+            # Codex runs the model's commands in bubblewrap, which needs
+            # unprivileged user namespaces on the runner. The sandbox is checked
+            # in an empty directory because Codex reads project configuration
+            # from .codex/, and the checkout's .codex/ comes from the pull
+            # request.
+            - name: Check the Codex sandbox
+              id: sandbox
+              if: steps.prepare.outputs.review == 'true'
+              timeout-minutes: 2
+              env:
+                  CODEX: ${{ steps.install.outputs.codex }}
+                  CODEX_HOME: ${{ runner.temp }}/codex-review/home/.codex
+              run: |
+                  empty="$RUNNER_TEMP/codex-review/sandbox-check"
+                  mkdir -p "$empty"
+                  "$CODEX" sandbox --permission-profile review -C "$empty" -- true
+                  cache="$HOME/.bun/install/cache"
+                  if [ -d "$cache" ] && "$CODEX" sandbox --permission-profile review -C "$empty" -- ls -A "$cache" > /dev/null 2>&1; then
+                      echo "The model's commands could read the runner's Bun install cache, $cache." >&2
+                      exit 1
+                  fi
 
             # Codex loads skills from the repository's .agents/skills, where a
             # pull request could add its own copy of exhaustive-review.
@@ -293,7 +301,6 @@ jobs:
                       --ephemeral \
                       --ignore-rules \
                       --color never \
-                      --sandbox read-only \
                       --cd "$GITHUB_WORKSPACE" \
                       --model "$MODEL" \
                       -c "model_reasoning_effort=\"$EFFORT\"" \

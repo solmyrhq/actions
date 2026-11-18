@@ -23,10 +23,24 @@ function table(name) {
   return entries;
 }
 
-test("commands run in a read-only sandbox, and Codex never stops to ask", () => {
+test("commands run under the review profile, which extends the read-only one, and Codex never stops to ask", () => {
   const top = table("");
-  assert.equal(top.sandbox_mode, '"read-only"');
+  assert.equal(top.default_permissions, '"review"');
   assert.equal(top.approval_policy, '"never"');
+  assert.equal(table("permissions.review").extends, '":read-only"');
+});
+
+// With sandbox_mode in any config file, Codex ignores default_permissions.
+test("no sandbox_mode replaces the review profile", () => {
+  assert.doesNotMatch(CONFIG, /^sandbox_mode\b/m);
+});
+
+// The workflow appends the deny rule for the runner's Bun install cache, whose
+// path depends on the runner user's home, to the end of the file.
+test("the review profile's filesystem table is the last table in the file", () => {
+  const tables = CONFIG.split("\n").filter((line) => line.startsWith("["));
+  assert.equal(tables.at(-1), "[permissions.review.filesystem]");
+  assert.deepEqual(table("permissions.review.filesystem"), {});
 });
 
 test("the pull request's AGENTS.md is not read as instructions", () => {
