@@ -30,7 +30,9 @@ test("commands run under the review profile, which extends the read-only one, an
   assert.equal(table("permissions.review").extends, '":read-only"');
 });
 
-// With sandbox_mode in any config file, Codex ignores default_permissions.
+// Codex 0.165.0 prefers default_permissions to a sandbox_mode in the same
+// file. A sandbox_mode here would still suggest to a reader that it sets the
+// sandbox.
 test("no sandbox_mode replaces the review profile", () => {
   assert.doesNotMatch(CONFIG, /^sandbox_mode\b/m);
 });

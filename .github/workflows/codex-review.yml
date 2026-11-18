@@ -207,8 +207,9 @@ jobs:
               timeout-minutes: 1
               run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-            # HOME here is the runner user's own. The steps after this one give
-            # Codex and the model's commands the temporary HOME below.
+            # This step does not set HOME, and $HOME is the runner user's own.
+            # Only the step that runs the review gives Codex the temporary HOME
+            # that this step makes.
             - name: Set up Codex
               id: setup
               if: steps.prepare.outputs.review == 'true'
@@ -244,7 +245,7 @@ jobs:
                   "$CODEX" sandbox --permission-profile review -C "$empty" -- true
                   cache="$HOME/.bun/install/cache"
                   if [ -d "$cache" ] && "$CODEX" sandbox --permission-profile review -C "$empty" -- ls -A "$cache" > /dev/null 2>&1; then
-                      echo "The model's commands could read the runner's Bun install cache, $cache." >&2
+                      echo "A command in the Codex sandbox could list the runner's Bun install cache, $cache." >&2
                       exit 1
                   fi
 
