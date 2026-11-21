@@ -147,6 +147,190 @@ test("the review fails before Codex starts when the pinned harness has no review
   assert.doesNotMatch(result.config ?? "", /deny/);
 });
 
+// Runs the review step's script against a fake Codex and a fake curl. The
+// fake curl answers each request with the next of `answers`, as
+// [status, retryAfterSeconds]. The step's timings come from WATCH_INTERVAL and
+// RECONNECT_QUIET, which the test sets to seconds.
+function runReview({ answers, codex, env = {}, stopAfter }) {
+  const run = /\n {14}run: \|\n((?: {18}.*\n|\n)+)/.exec(review("Review the pull request") + "\n");
+  assert.ok(run, "the review step has no run script");
+  const script = run[1].replace(/^ {18}/gm, "");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-review-"));
+  const bin = path.join(root, "bin");
+  const harness = path.join(root, "harness");
+  const context = path.join(root, "context");
+  for (const dir of [bin, harness, context, path.join(root, "codex-review")]) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(harness, "prompt.md"), "Review it.\n");
+  fs.writeFileSync(path.join(context, "diff.patch"), "");
+  fs.writeFileSync(path.join(root, "answers"), answers.map(([status, retry]) => `${status} ${retry ?? ""}`).join("\n") + "\n");
+  fs.writeFileSync(
+    path.join(bin, "curl"),
+    `#!/bin/bash
+echo "$*" >> "${root}/curl-args"
+cat >> "${root}/curl-config"
+headers=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--dump-header" ]; then headers="$2"; fi
+  shift
+done
+count=$(wc -l < "${root}/curl-args")
+read -r status retry < <(sed -n "\${count}p" "${root}/answers")
+status=\${status:-200}
+printf 'HTTP/1.1 %s\\r\\n' "$status" > "$headers"
+if [ -n "$retry" ]; then printf 'Retry-After: %s\\r\\n' "$retry" >> "$headers"; fi
+printf '%s' "$status"
+`,
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(path.join(bin, "codex"), `#!/bin/bash\ntouch "${root}/codex-started"\n${codex}\n`, { mode: 0o755 });
+  const started = Date.now();
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
+    encoding: "utf8",
+    timeout: stopAfter ?? 60_000,
+    killSignal: "SIGTERM",
+    env: {
+      PATH: `${bin}:${process.env.PATH}`,
+      CODEX: path.join(bin, "codex"),
+      HARNESS: harness,
+      CONTEXT: context,
+      PR_NUMBER: "7",
+      REPOSITORY: "solmyrhq/example",
+      HEAD_SHA: "0".repeat(40),
+      BASE_URL: "https://proxy.example/v1",
+      MODEL: "gpt-test",
+      EFFORT: "high",
+      RUNNER_TEMP: root,
+      GITHUB_WORKSPACE: root,
+      HTTPS_PROXY: "http://127.0.0.1:9",
+      CLIPROXY_API_KEY: "secret-proxy-key",
+      WATCH_INTERVAL: "1",
+      RECONNECT_QUIET: "2",
+      ...env,
+    },
+  });
+  const read = (name) => (fs.existsSync(path.join(root, name)) ? fs.readFileSync(path.join(root, name), "utf8") : "");
+  const out = {
+    ...result,
+    seconds: (Date.now() - started) / 1000,
+    codexStarted: fs.existsSync(path.join(root, "codex-started")),
+    curlArgs: read("curl-args"),
+    curlConfig: read("curl-config"),
+    sleeper: read("sleeper").trim(),
+  };
+  fs.rmSync(root, { recursive: true, force: true });
+  return out;
+}
+
+test("the review fails before Codex starts when the proxy reports a long quota cooldown", () => {
+  const result = runReview({ answers: [[429, 90000]], codex: "exit 0" });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.codexStarted, false);
+  assert.match(result.stdout + result.stderr, /429/);
+  assert.match(result.stdout + result.stderr, /25 hours/);
+  assert.match(result.stdout + result.stderr, /reset-quota/);
+});
+
+test("the proxy check sends the key in curl's configuration on stdin, never on the command line", () => {
+  const result = runReview({ answers: [[200]], codex: "exit 0" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!result.curlArgs.includes("secret-proxy-key"), "the key is on curl's command line");
+  assert.ok(result.curlConfig.includes("Authorization: Bearer secret-proxy-key"));
+  assert.ok(result.curlArgs.includes("https://proxy.example/v1/responses"));
+  assert.ok(result.curlArgs.includes("--proxy http://127.0.0.1:9"));
+});
+
+test("a quote or a backslash in the key is escaped in curl's configuration", () => {
+  const result = runReview({ answers: [[200]], codex: "exit 0", env: { CLIPROXY_API_KEY: 'a"b\\c' } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.curlConfig.includes('header = "Authorization: Bearer a\\"b\\\\c"\n'), result.curlConfig);
+});
+
+test("Codex still runs after a short 429 or a 429 without Retry-After, which Codex handles itself", () => {
+  for (const answer of [[429, 30], [429], [500]]) {
+    const result = runReview({ answers: [answer], codex: "echo reviewed" });
+    assert.equal(result.status, 0, `${answer}: ${result.stderr}`);
+    assert.equal(result.codexStarted, true);
+    assert.match(result.stdout, /reviewed/);
+  }
+});
+
+test("the step shows Codex's output and ends with Codex's exit code", () => {
+  const result = runReview({ answers: [[200]], codex: "echo first line; echo second line >&2; exit 3" });
+  assert.equal(result.status, 3);
+  assert.match(result.stdout, /first line/);
+  assert.match(result.stdout, /second line/);
+});
+
+const CODEX_WITH_CHILD = `sleep 600 & echo $! > "$RUNNER_TEMP/sleeper"; wait`;
+
+function assertChildStopped(result) {
+  assert.ok(result.sleeper, "the fake Codex started no child");
+  // In CI, Node is PID 1 of its container and reaps no orphans, so the killed child stays a zombie.
+  let alive = true;
+  try {
+    alive = !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${result.sleeper}/stat`, "utf8"));
+  } catch {
+    alive = false;
+  }
+  if (alive) process.kill(Number(result.sleeper));
+  assert.equal(alive, false, "a process that Codex started outlived the step");
+}
+
+test("the watchdog stops Codex when it hangs on a reconnect and the proxy then reports a cooldown", () => {
+  const result = runReview({
+    answers: [[200], [429, 90000]],
+    codex: `echo 'ERROR: Reconnecting... 1/5'; ${CODEX_WITH_CHILD}`,
+  });
+  assert.notEqual(result.status, 0);
+  assert.ok(result.seconds < 30, `the step ran for ${result.seconds} seconds`);
+  assert.match(result.stdout + result.stderr, /25 hours/);
+  assertChildStopped(result);
+});
+
+test("a cancelled or timed-out step stops Codex and every process that Codex started", () => {
+  const result = runReview({ answers: [[200]], codex: `echo working; ${CODEX_WITH_CHILD}`, stopAfter: 3000 });
+  assert.ok(result.seconds < 15, `the step ran for ${result.seconds} seconds after SIGTERM`);
+  assertChildStopped(result);
+});
+
+test("a failed command in the watchdog stops Codex too", () => {
+  const result = runReview({ answers: [[200]], codex: `echo working; rm "$RUNNER_TEMP/codex-review/codex.log"; ${CODEX_WITH_CHILD}` });
+  assert.notEqual(result.status, 0);
+  assert.ok(result.seconds < 15, `the step ran for ${result.seconds} seconds`);
+  assertChildStopped(result);
+});
+
+test("a Codex that ignores SIGTERM is killed a few seconds after the step is stopped", () => {
+  const result = runReview({ answers: [[200]], codex: `trap '' TERM; echo working; ${CODEX_WITH_CHILD}`, stopAfter: 3000 });
+  assert.ok(result.seconds < 15, `the step ran for ${result.seconds} seconds after SIGTERM`);
+  assertChildStopped(result);
+});
+
+test("a trailing slash on the base URL does not double the slash before /responses", () => {
+  const result = runReview({ answers: [[200]], codex: "exit 0", env: { BASE_URL: "https://proxy.example/v1//" } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.curlArgs.includes("https://proxy.example/v1/responses"), result.curlArgs);
+});
+
+test("the watchdog leaves Codex alone when output follows the reconnect", () => {
+  const result = runReview({
+    answers: [[200], [429, 90000]],
+    codex: "echo 'ERROR: Reconnecting... 1/5'; sleep 1; echo working; sleep 4; echo done",
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /done/);
+  assert.equal(result.curlArgs.trim().split("\n").length, 1, "the proxy was checked again while Codex was working");
+});
+
+test("the watchdog lets Codex wait out a reconnect when the proxy has no cooldown", () => {
+  const result = runReview({
+    answers: [[200], [200], [200]],
+    codex: "echo 'ERROR: Reconnecting... 1/5'; sleep 5; echo done",
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /done/);
+});
+
 test("Codex and its skills live under a temporary HOME, outside the checkout", () => {
   const run = review("Review the pull request");
   assert.match(run, /HOME: \$\{\{ runner\.temp \}\}\/codex-review\/home\n/);

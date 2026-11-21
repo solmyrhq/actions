@@ -292,7 +292,37 @@ jobs:
                   if [ ! -e "$CONTEXT/diff.patch" ]; then
                       prompt=$(printf '%s\n\ndiff.patch is missing because the GitHub API returned an error instead of the diff of this pull request. Read the patch of each file from files.json instead.\n' "$prompt")
                   fi
-                  "$CODEX" exec \
+
+                  # When every credential is in a cooldown, CLIProxyAPI answers
+                  # 429 with a Retry-After of the whole cooldown, up to a day.
+                  # Codex waits out any Retry-After, so it would sit until this
+                  # step times out. Codex copes with 600 seconds or less.
+                  in_cooldown() {
+                      local headers="$RUNNER_TEMP/codex-review/proxy-headers" code retry key url=$BASE_URL
+                      while [ "$url" != "${url%/}" ]; do
+                          url=${url%/}
+                      done
+                      key=${CLIPROXY_API_KEY//\\/\\\\}
+                      key=${key//\"/\\\"}
+                      code=$(printf 'header = "Authorization: Bearer %s"\n' "$key" |
+                          curl --config - --silent --output /dev/null --dump-header "$headers" \
+                              --write-out '%{http_code}' --max-time 60 --proxy "$HTTPS_PROXY" \
+                              --header 'Content-Type: application/json' \
+                              --data "$(printf '{"model":"%s","input":"Reply with OK.","max_output_tokens":16}' "$MODEL")" \
+                              "$url/responses") || return 1
+                      [ "$code" = 429 ] || return 1
+                      retry=$(sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\).*/\1/p' "$headers" | sed -n '$p')
+                      [ -n "$retry" ] && [ "$retry" -gt 600 ] || return 1
+                      echo "::error::The model proxy answers requests for $MODEL with 429 Too Many Requests, because the quota of every credential is in a cooldown. The proxy says to try again in about $(((retry + 3599) / 3600)) hours. If the quota has been reset upstream, restart CLIProxyAPI, or clear the cooldown with POST /reset-quota on its management API, and then run the review again."
+                  }
+
+                  if in_cooldown; then
+                      exit 1
+                  fi
+
+                  log="$RUNNER_TEMP/codex-review/codex.log"
+                  : > "$log"
+                  setsid "$CODEX" exec \
                       --strict-config \
                       --ephemeral \
                       --ignore-rules \
@@ -305,7 +335,56 @@ jobs:
                       -c "agents.default_subagent_reasoning_effort=\"$EFFORT\"" \
                       --output-schema "$HARNESS/output-schema.json" \
                       --output-last-message "$RUNNER_TEMP/codex-review/review.json" \
-                      "$prompt" < /dev/null
+                      "$prompt" < /dev/null > "$log" 2>&1 &
+                  codex=$!
+
+                  stop_codex() {
+                      local killer
+                      kill -TERM -- "-$codex" 2> /dev/null || return 0
+                      (sleep 5 && kill -KILL -- "-$codex") 2> /dev/null &
+                      killer=$!
+                      wait "$codex" 2> /dev/null || true
+                      kill -KILL -- "-$codex" 2> /dev/null || true
+                      kill "$killer" 2> /dev/null || true
+                  }
+                  trap stop_codex EXIT
+                  trap 'exit 130' INT
+                  trap 'exit 143' TERM
+
+                  # A quota can also run out mid-review. Codex then prints
+                  # "Reconnecting..." and nothing more until the Retry-After
+                  # has passed.
+                  interval=${WATCH_INTERVAL:-10}
+                  quiet=${RECONNECT_QUIET:-120}
+                  shown=0
+                  last_output=$SECONDS
+                  last_check=$SECONDS
+                  show_new_output() {
+                      local size
+                      size=$(stat -c %s "$log")
+                      if [ "$size" -gt "$shown" ]; then
+                          { tail -c "+$((shown + 1))" "$log" | head -c "$((size - shown))"; } || true
+                          shown=$size
+                          last_output=$SECONDS
+                      fi
+                  }
+                  while kill -0 "$codex" 2> /dev/null; do
+                      sleep "$interval" &
+                      wait $! || true
+                      show_new_output
+                      if tail -n 1 "$log" | grep -q 'Reconnecting\.\.\.' &&
+                          [ $((SECONDS - last_output)) -ge "$quiet" ] &&
+                          [ $((SECONDS - last_check)) -ge "$quiet" ]; then
+                          last_check=$SECONDS
+                          if in_cooldown; then
+                              exit 1
+                          fi
+                      fi
+                  done
+                  status=0
+                  wait "$codex" || status=$?
+                  show_new_output
+                  exit "$status"
 
             - name: Restore the pull request's agent files
               id: restore
