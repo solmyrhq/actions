@@ -298,7 +298,10 @@ jobs:
                   # Codex waits out any Retry-After, so it would sit until this
                   # step times out. Codex copes with 600 seconds or less.
                   in_cooldown() {
-                      local headers="$RUNNER_TEMP/codex-review/proxy-headers" code retry key
+                      local headers="$RUNNER_TEMP/codex-review/proxy-headers" code retry key url=$BASE_URL
+                      while [ "$url" != "${url%/}" ]; do
+                          url=${url%/}
+                      done
                       key=${CLIPROXY_API_KEY//\\/\\\\}
                       key=${key//\"/\\\"}
                       code=$(printf 'header = "Authorization: Bearer %s"\n' "$key" |
@@ -306,7 +309,7 @@ jobs:
                               --write-out '%{http_code}' --max-time 60 --proxy "$HTTPS_PROXY" \
                               --header 'Content-Type: application/json' \
                               --data "$(printf '{"model":"%s","input":"Reply with OK.","max_output_tokens":16}' "$MODEL")" \
-                              "$BASE_URL/responses") || return 1
+                              "$url/responses") || return 1
                       [ "$code" = 429 ] || return 1
                       retry=$(sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\).*/\1/p' "$headers" | sed -n '$p')
                       [ -n "$retry" ] && [ "$retry" -gt 600 ] || return 1
@@ -319,7 +322,7 @@ jobs:
 
                   log="$RUNNER_TEMP/codex-review/codex.log"
                   : > "$log"
-                  "$CODEX" exec \
+                  setsid "$CODEX" exec \
                       --strict-config \
                       --ephemeral \
                       --ignore-rules \
@@ -360,7 +363,7 @@ jobs:
                           [ $((SECONDS - last_check)) -ge "$quiet" ]; then
                           last_check=$SECONDS
                           if in_cooldown; then
-                              kill "$codex" 2> /dev/null || true
+                              kill -- "-$codex" 2> /dev/null || kill "$codex" 2> /dev/null || true
                               wait "$codex" || true
                               exit 1
                           fi

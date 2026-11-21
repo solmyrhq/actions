@@ -214,6 +214,7 @@ printf '%s' "$status"
     codexStarted: fs.existsSync(path.join(root, "codex-started")),
     curlArgs: read("curl-args"),
     curlConfig: read("curl-config"),
+    sleeper: read("sleeper").trim(),
   };
   fs.rmSync(root, { recursive: true, force: true });
   return out;
@@ -262,11 +263,27 @@ test("the step shows Codex's output and ends with Codex's exit code", () => {
 test("the watchdog stops Codex when it hangs on a reconnect and the proxy then reports a cooldown", () => {
   const result = runReview({
     answers: [[200], [429, 90000]],
-    codex: "echo 'ERROR: Reconnecting... 1/5'; sleep 600",
+    codex: `echo 'ERROR: Reconnecting... 1/5'; sleep 600 & echo $! > "$RUNNER_TEMP/sleeper"; wait`,
   });
   assert.notEqual(result.status, 0);
   assert.ok(result.seconds < 30, `the step ran for ${result.seconds} seconds`);
   assert.match(result.stdout + result.stderr, /25 hours/);
+  assert.ok(result.sleeper, "the fake Codex started no child");
+  // In CI, Node is PID 1 of its container and reaps no orphans, so the killed child stays a zombie.
+  let alive = true;
+  try {
+    alive = !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${result.sleeper}/stat`, "utf8"));
+  } catch {
+    alive = false;
+  }
+  if (alive) process.kill(Number(result.sleeper));
+  assert.equal(alive, false, "a process that Codex started outlived the step");
+});
+
+test("a trailing slash on the base URL does not double the slash before /responses", () => {
+  const result = runReview({ answers: [[200]], codex: "exit 0", env: { BASE_URL: "https://proxy.example/v1//" } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.curlArgs.includes("https://proxy.example/v1/responses"), result.curlArgs);
 });
 
 test("the watchdog leaves Codex alone when output follows the reconnect", () => {
