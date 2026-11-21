@@ -338,6 +338,19 @@ jobs:
                       "$prompt" < /dev/null > "$log" 2>&1 &
                   codex=$!
 
+                  stop_codex() {
+                      local killer
+                      kill -TERM -- "-$codex" 2> /dev/null || return 0
+                      (sleep 5 && kill -KILL -- "-$codex") 2> /dev/null &
+                      killer=$!
+                      wait "$codex" 2> /dev/null || true
+                      kill -KILL -- "-$codex" 2> /dev/null || true
+                      kill "$killer" 2> /dev/null || true
+                  }
+                  trap stop_codex EXIT
+                  trap 'exit 130' INT
+                  trap 'exit 143' TERM
+
                   # A quota can also run out mid-review. Codex then prints
                   # "Reconnecting..." and nothing more until the Retry-After
                   # has passed.
@@ -356,15 +369,14 @@ jobs:
                       fi
                   }
                   while kill -0 "$codex" 2> /dev/null; do
-                      sleep "$interval"
+                      sleep "$interval" &
+                      wait $! || true
                       show_new_output
                       if tail -n 1 "$log" | grep -q 'Reconnecting\.\.\.' &&
                           [ $((SECONDS - last_output)) -ge "$quiet" ] &&
                           [ $((SECONDS - last_check)) -ge "$quiet" ]; then
                           last_check=$SECONDS
                           if in_cooldown; then
-                              kill -- "-$codex" 2> /dev/null || kill "$codex" 2> /dev/null || true
-                              wait "$codex" || true
                               exit 1
                           fi
                       fi

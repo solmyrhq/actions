@@ -151,7 +151,7 @@ test("the review fails before Codex starts when the pinned harness has no review
 // fake curl answers each request with the next of `answers`, as
 // [status, retryAfterSeconds]. The step's timings come from WATCH_INTERVAL and
 // RECONNECT_QUIET, which the test sets to seconds.
-function runReview({ answers, codex, env = {} }) {
+function runReview({ answers, codex, env = {}, stopAfter }) {
   const run = /\n {14}run: \|\n((?: {18}.*\n|\n)+)/.exec(review("Review the pull request") + "\n");
   assert.ok(run, "the review step has no run script");
   const script = run[1].replace(/^ {18}/gm, "");
@@ -186,7 +186,8 @@ printf '%s' "$status"
   const started = Date.now();
   const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: stopAfter ?? 60_000,
+    killSignal: "SIGTERM",
     env: {
       PATH: `${bin}:${process.env.PATH}`,
       CODEX: path.join(bin, "codex"),
@@ -260,14 +261,9 @@ test("the step shows Codex's output and ends with Codex's exit code", () => {
   assert.match(result.stdout, /second line/);
 });
 
-test("the watchdog stops Codex when it hangs on a reconnect and the proxy then reports a cooldown", () => {
-  const result = runReview({
-    answers: [[200], [429, 90000]],
-    codex: `echo 'ERROR: Reconnecting... 1/5'; sleep 600 & echo $! > "$RUNNER_TEMP/sleeper"; wait`,
-  });
-  assert.notEqual(result.status, 0);
-  assert.ok(result.seconds < 30, `the step ran for ${result.seconds} seconds`);
-  assert.match(result.stdout + result.stderr, /25 hours/);
+const CODEX_WITH_CHILD = `sleep 600 & echo $! > "$RUNNER_TEMP/sleeper"; wait`;
+
+function assertChildStopped(result) {
   assert.ok(result.sleeper, "the fake Codex started no child");
   // In CI, Node is PID 1 of its container and reaps no orphans, so the killed child stays a zombie.
   let alive = true;
@@ -278,6 +274,36 @@ test("the watchdog stops Codex when it hangs on a reconnect and the proxy then r
   }
   if (alive) process.kill(Number(result.sleeper));
   assert.equal(alive, false, "a process that Codex started outlived the step");
+}
+
+test("the watchdog stops Codex when it hangs on a reconnect and the proxy then reports a cooldown", () => {
+  const result = runReview({
+    answers: [[200], [429, 90000]],
+    codex: `echo 'ERROR: Reconnecting... 1/5'; ${CODEX_WITH_CHILD}`,
+  });
+  assert.notEqual(result.status, 0);
+  assert.ok(result.seconds < 30, `the step ran for ${result.seconds} seconds`);
+  assert.match(result.stdout + result.stderr, /25 hours/);
+  assertChildStopped(result);
+});
+
+test("a cancelled or timed-out step stops Codex and every process that Codex started", () => {
+  const result = runReview({ answers: [[200]], codex: `echo working; ${CODEX_WITH_CHILD}`, stopAfter: 3000 });
+  assert.ok(result.seconds < 15, `the step ran for ${result.seconds} seconds after SIGTERM`);
+  assertChildStopped(result);
+});
+
+test("a failed command in the watchdog stops Codex too", () => {
+  const result = runReview({ answers: [[200]], codex: `echo working; rm "$RUNNER_TEMP/codex-review/codex.log"; ${CODEX_WITH_CHILD}` });
+  assert.notEqual(result.status, 0);
+  assert.ok(result.seconds < 15, `the step ran for ${result.seconds} seconds`);
+  assertChildStopped(result);
+});
+
+test("a Codex that ignores SIGTERM is killed a few seconds after the step is stopped", () => {
+  const result = runReview({ answers: [[200]], codex: `trap '' TERM; echo working; ${CODEX_WITH_CHILD}`, stopAfter: 3000 });
+  assert.ok(result.seconds < 15, `the step ran for ${result.seconds} seconds after SIGTERM`);
+  assertChildStopped(result);
 });
 
 test("a trailing slash on the base URL does not double the slash before /responses", () => {
