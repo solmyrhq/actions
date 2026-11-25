@@ -46,6 +46,43 @@ This action joins the tailnet in the same way as `tailnet-ssh`. For the rest of 
 
 The proxy resolves MagicDNS names. It carries HTTP, and HTTPS in a `CONNECT` tunnel. It does not carry other protocols. The hosts and ports that a node with these tags can connect to are set in the tailnet policy.
 
+## deploy-commit
+
+This action chooses the commit that a deploy job deploys. Run the action in the deploy job, and deploy the commit in the `sha` output. Put the deploy job in a concurrency group with `cancel-in-progress: false`. If `cancel-in-progress` is `true`, GitHub can cancel a deploy while it runs. The job does not need a checkout.
+
+```yaml
+deploy:
+    runs-on: <runner>
+    concurrency:
+        group: deploy
+        cancel-in-progress: false
+    permissions:
+        contents: read
+        checks: read
+    steps:
+        - id: commit
+          uses: solmyrhq/actions/deploy-commit@<commit sha>
+          with:
+              token: ${{ github.token }}
+              branch: main
+              check-name: Lint and test
+              sha: ${{ inputs.sha }}
+        - run: ssh -F "$SSH_CONFIG" -i "$key_file" "$DEPLOY_USER@$DEPLOY_HOST" "app $DEPLOY_SHA"
+          env:
+              DEPLOY_SHA: ${{ steps.commit.outputs.sha }}
+```
+
+The action does these steps in this order:
+
+1. It fails if `branch` is not a valid branch name, or if the run is not for `refs/heads/<branch>`. It fails if `sha` is not empty and is not a full commit SHA in lower case. If `sha` is empty, the action does not do steps 2 to 4. It reads the newest 500 commits of the branch's history, as in step 2. It outputs the newest commit on the first-parent chain of these commits that passed the check. If no commit on that chain passed, the action fails. This commit can be older than the tip of the branch. For example, if the push of the tip changes no file in the `paths` filter of the check's workflow, GitHub does not run the workflow. The tip then has no run of the check.
+2. It reads the newest 500 commits of the branch's history through the REST API, from the current tip of the branch. It fails if `sha` is not on the first-parent chain of these commits. A commit that is in the branch's history only through the second parent of a merge commit is not on the chain. To deploy that commit, give the SHA of the merge commit. If `sha` is further down the chain than these commits reach, the action also fails.
+3. It fails if no run of the `check-name` check on `sha` passed. It counts only the check runs that GitHub Actions created, because any other app with write access to checks can create a passing check run with the same name. It counts the runs of every attempt, because a commit that passed and then failed a rerun can already be in production.
+4. It outputs the newest commit on the first-parent chain, from `sha` to the tip, that passed the check. If no commit newer than `sha` passed, it outputs `sha`.
+
+The action can output a commit newer than `sha` because GitHub keeps at most one pending job in a concurrency group. When another job joins the group, GitHub cancels the pending job, even if that job is for a newer commit. The deploy that runs last can therefore be for an older commit. Each deploy job deploys the newest commit that passed the check. Thus, unless someone force-pushes the branch, production does not go back to an older commit. After GitHub cancels a deploy, the next deploy deploys the commit of the cancelled deploy or a newer commit.
+
+Start the deploy from the workflow that runs the check. In that workflow, add a job that `needs` the job that runs the check. Run this job only for pushes to `branch`. In this job, run `gh workflow run` for the deploy workflow, and give the commit in the `sha` input. If `branch` is not the default branch of the repository, also give `--ref <branch>`. Without `--ref`, the deploy run is for the default branch, and step 1 fails. The token of this job needs the `actions: write` permission. An event that `GITHUB_TOKEN` causes usually starts no workflow run. A `workflow_dispatch` event is an exception. Do not start the deploy workflow on `push` with a job that waits for the check. On shared runners, the waiting job can hold the last free runner, and then the check cannot start.
+
 ## Review workflows
 
 Three reusable workflows review a pull request with the `exhaustive-review` skill: `.github/workflows/claude-review.yml`, `.github/workflows/codex-review.yml` and `.github/workflows/opencode-review.yml`. A fourth reusable workflow, `.github/workflows/review.yml`, calls these three workflows. Each repository calls `review.yml` from one caller workflow in that repository. The caller runs on `pull_request_target` for pull requests. For `pull_request_target`, GitHub runs the caller from the base branch of the pull request. A pull request therefore cannot change the workflow that reviews it. No workflow reviews a draft pull request or a pull request from a fork. Under `pull_request_target`, the job for a pull request from a fork would get the secrets of the repository.
