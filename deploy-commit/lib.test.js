@@ -37,7 +37,8 @@ function github({ history, runs = {} }) {
   };
 }
 
-const linear = [5, 4, 3, 2, 1].map((n) => (n === 1 ? [sha(n)] : [sha(n), sha(n - 1)]));
+const linearOf = (count) => Array.from({ length: count }, (_, i) => count - i).map((n) => (n === 1 ? [sha(n)] : [sha(n), sha(n - 1)]));
+const linear = linearOf(5);
 
 const choose = (gh, overrides = {}) =>
   lib.chooseDeployCommit({ github: gh, repository: REPOSITORY, ref: REF, branch: "main", sha: sha(3), checkName: CHECK, ...overrides });
@@ -69,6 +70,32 @@ test("a commit that is on the branch only through the second parent of a merge i
   assert.equal(await choose(gh, { sha: sha(9) }), sha(9));
 });
 
+test("with no commit given, the newest commit that passed is deployed, even when the tip has no check run", async () => {
+  const gh = github({ history: linear, runs: { [sha(4)]: [passed], [sha(3)]: [passed] } });
+  assert.equal(await choose(gh, { sha: "" }), sha(4));
+});
+
+test("with no commit given and a tip that passed, the branch's history is not read", async () => {
+  const gh = github({ history: linear, runs: { [sha(5)]: [passed] } });
+  assert.equal(await choose(gh, { sha: "" }), sha(5));
+  assert.deepEqual(
+    gh.routes.filter((route) => route.startsWith(`/repos/${REPOSITORY}/commits?`)),
+    [],
+  );
+});
+
+test("with no commit given, nothing is deployed when no commit in the history that the walk may read passed", async () => {
+  await assert.rejects(
+    choose(github({ history: linear, runs: { [sha(5)]: [failed] } }), { sha: "" }),
+    /^Error: No commit on the branch's first-parent chain has a run of the "Lint and test" check by GitHub Actions that passed\.$/,
+  );
+  const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES + 2;
+  await assert.rejects(
+    choose(github({ history: linearOf(count) }), { sha: "" }),
+    new RegExp(`that passed\\. The action read only the newest ${lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES} commits of the branch's history\\.$`),
+  );
+});
+
 test("a short or upper-case SHA, a run for another ref and a bad branch name are refused before any request", async () => {
   const gh = github({ history: linear });
   await assert.rejects(choose(gh, { sha: "abc1234" }), /is not a full commit SHA/);
@@ -80,27 +107,35 @@ test("a short or upper-case SHA, a run for another ref and a bad branch name are
   assert.deepEqual(gh.routes, []);
 });
 
-test("passing runs are counted across every page, only from GitHub Actions and only when they succeeded", async () => {
+test("a passing run is looked for on every page until one is found, and only a successful run by GitHub Actions counts", async () => {
   const other = { conclusion: "success", app: { id: 1 } };
-  const runs = { [sha(3)]: [...Array(lib.PAGE_SIZE).fill(failed), other, passed] };
-  const gh = github({ history: linear, runs });
-  assert.equal(await lib.passingRuns({ github: gh, repository: REPOSITORY, sha: sha(3), checkName: CHECK }), 1);
-  assert.equal(gh.routes.length, 2);
-  const query = new URL(gh.routes[0], "https://api.invalid").searchParams;
+  const check = (runs) => {
+    const gh = github({ history: linear, runs: { [sha(3)]: runs } });
+    return lib.hasPassingRun({ github: gh, repository: REPOSITORY, sha: sha(3), checkName: CHECK }).then((found) => ({ found, gh }));
+  };
+
+  const later = await check([...Array(lib.PAGE_SIZE).fill(failed), other, passed]);
+  assert.equal(later.found, true);
+  assert.equal(later.gh.routes.length, 2);
+  const query = new URL(later.gh.routes[0], "https://api.invalid").searchParams;
   assert.equal(query.get("check_name"), CHECK);
   assert.equal(query.get("filter"), "all");
   assert.equal(query.get("app_id"), String(lib.GITHUB_ACTIONS_APP_ID));
+
+  const first = await check([passed, ...Array(lib.PAGE_SIZE + 1).fill(failed)]);
+  assert.equal(first.found, true);
+  assert.equal(first.gh.routes.length, 1);
+
+  const none = await check([...Array(lib.PAGE_SIZE).fill(failed), other]);
+  assert.equal(none.found, false);
+  assert.equal(none.gh.routes.length, 2);
 });
 
 test("the walk reads more of the branch's history only when it needs to, and stops after the last page it may read", async () => {
   // Reaching sha(1) needs the parents of PAGE_SIZE * MAX_HISTORY_PAGES + 1
   // commits, one more than the walk may read.
   const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES + 2;
-  const history = Array.from({ length: count }, (_, i) => {
-    const n = count - i;
-    return n === 1 ? [sha(n)] : [sha(n), sha(n - 1)];
-  });
-  const gh = github({ history });
+  const gh = github({ history: linearOf(count) });
   const walk = (target) => lib.firstParentsAfter({ github: gh, repository: REPOSITORY, tip: sha(count), sha: target });
 
   assert.deepEqual(await walk(sha(count - 2)), [sha(count), sha(count - 1)]);

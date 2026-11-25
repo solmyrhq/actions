@@ -7,7 +7,7 @@ const lib = require("./lib.js");
 run(async () => {
   const branch = input("branch");
   const checkName = input("check-name");
-  const requested = input("sha", { required: false }) || process.env.GITHUB_SHA;
+  const requested = input("sha", { required: false });
 
   const sha = await lib.chooseDeployCommit({
     github: runnerClient(input("token")),
@@ -17,7 +17,9 @@ run(async () => {
     sha: requested,
     checkName,
   });
-  if (sha === requested) {
+  if (requested === "") {
+    info(`The commit to deploy is ${sha}, the newest commit on the first-parent chain of ${branch} that passed the "${checkName}" check.`);
+  } else if (sha === requested) {
     info(`The commit to deploy is ${sha}. It passed the "${checkName}" check.`);
   } else {
     annotate(

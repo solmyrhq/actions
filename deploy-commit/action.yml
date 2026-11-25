@@ -3,7 +3,8 @@ description: >-
   Checks that a commit is on the first-parent chain of the deployed branch,
   and that a run of a check that GitHub Actions created passed on the commit.
   Outputs the newest commit on that chain that passed the check. This commit
-  can be newer than the given commit.
+  can be newer than the given commit. If no commit is given, outputs the
+  newest commit on the chain that passed the check.
 
 inputs:
   token:
@@ -23,7 +24,8 @@ inputs:
   sha:
     description: >-
       The full SHA, in lower case, of the commit to check. If it is empty, the
-      action uses the commit of the run.
+      action outputs the newest commit on the first-parent chain of `branch`
+      that passed the check.
     required: false
     default: ""
 
@@ -32,7 +34,8 @@ outputs:
     description: >-
       The full SHA of the commit to deploy. This is the newest commit on the
       first-parent chain of `branch`, from `sha` to the tip, that passed the
-      check. If no commit newer than `sha` passed, it is `sha`.
+      check. If no commit newer than `sha` passed, it is `sha`. If `sha` is
+      empty, it is the newest commit on the chain that passed the check.
 
 runs:
   using: node24
