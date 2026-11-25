@@ -1,0 +1,39 @@
+name: Choose the commit to deploy
+description: >-
+  Checks that a commit is on the first-parent chain of the deployed branch,
+  and that a run of a check that GitHub Actions created passed on the commit.
+  Outputs the newest commit on that chain that passed the check. This commit
+  can be newer than the given commit.
+
+inputs:
+  token:
+    description: >-
+      A token with the `contents: read` and `checks: read` permissions, such as
+      the job's GITHUB_TOKEN.
+    required: true
+  branch:
+    description: The deployed branch, such as `main`. The action fails if the run is for another ref.
+    required: true
+  check-name:
+    description: >-
+      The name of the check run that must pass. For a job with a `name`, the
+      check run has the same name. For a job in a matrix or in a called
+      workflow, the check run has a longer name.
+    required: true
+  sha:
+    description: >-
+      The full SHA, in lower case, of the commit to check. If it is empty, the
+      action uses the commit of the run.
+    required: false
+    default: ""
+
+outputs:
+  sha:
+    description: >-
+      The full SHA of the commit to deploy. This is the newest commit on the
+      first-parent chain of `branch`, from `sha` to the tip, that passed the
+      check. If no commit newer than `sha` passed, it is `sha`.
+
+runs:
+  using: node24
+  main: main.js
