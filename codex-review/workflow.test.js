@@ -263,14 +263,23 @@ test("the step shows Codex's output and ends with Codex's exit code", () => {
 
 const CODEX_WITH_CHILD = `sleep 600 & echo $! > "$RUNNER_TEMP/sleeper"; wait`;
 
+// In CI, Node is PID 1 of its container and reaps no orphans, so a killed child stays a zombie.
+function isAlive(pid) {
+  try {
+    return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 function assertChildStopped(result) {
   assert.ok(result.sleeper, "the fake Codex started no child");
-  // In CI, Node is PID 1 of its container and reaps no orphans, so the killed child stays a zombie.
-  let alive = true;
-  try {
-    alive = !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${result.sleeper}/stat`, "utf8"));
-  } catch {
-    alive = false;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + 2000;
+  let alive = isAlive(result.sleeper);
+  while (alive && Date.now() < deadline) {
+    Atomics.wait(pause, 0, 0, 50);
+    alive = isAlive(result.sleeper);
   }
   if (alive) process.kill(Number(result.sleeper));
   assert.equal(alive, false, "a process that Codex started outlived the step");
