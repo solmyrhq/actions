@@ -206,6 +206,13 @@ async function chooseDeployCommit({ github, repository, ref, branch, workflow, s
   if (checkOnly && sha === "") return "";
   github = limited(github);
 
+  const tags = await github.get(`/repos/${repository}/git/matching-refs/tags/${branch}`);
+  if (tags.some((tag) => tag.ref === `refs/tags/${branch}`)) {
+    throw new Error(
+      `The repository has a tag named ${branch}. A run for this tag has the same branch and the same workflow path as a run on the branch. Nothing was deployed. Delete the tag to deploy again.`,
+    );
+  }
+
   const { object } = await github.get(`/repos/${repository}/git/ref/heads/${branch}`);
   const tip = commitSha(object.sha);
   if (sha === "") return newestPassing({ github, repository, tip, branch, workflow, jobName });

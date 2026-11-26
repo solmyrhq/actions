@@ -17,7 +17,7 @@ const run = (jobs, overrides = {}) => ({ event: "push", branch: "main", reposito
 const passed = run([job("success")]);
 const failed = run([job("failure")]);
 
-function github({ history, runs = {}, lax = false }) {
+function github({ history, runs = {}, lax = false, tags = [] }) {
   const commits = history.map(([commit, ...parents]) => ({ sha: commit, parents: parents.map((parent) => ({ sha: parent })) }));
   const all = Object.entries(runs).flatMap(([commit, specs]) => specs.map((spec) => ({ ...spec, sha: commit })));
   all.forEach((spec, index) => {
@@ -33,6 +33,10 @@ function github({ history, runs = {}, lax = false }) {
       const pageOf = (items) => items.slice((page - 1) * lib.PAGE_SIZE, page * lib.PAGE_SIZE);
       if (url.pathname === `/repos/${REPOSITORY}/git/ref/heads/main`) {
         return { object: { sha: commits[0].sha } };
+      }
+      const matchingTags = new RegExp(`^/repos/${REPOSITORY}/git/matching-refs/tags/(.+)$`).exec(url.pathname);
+      if (matchingTags) {
+        return tags.filter((tag) => tag.startsWith(matchingTags[1])).map((tag) => ({ ref: `refs/tags/${tag}` }));
       }
       if (url.pathname === `/repos/${REPOSITORY}/commits`) {
         return pageOf(commits);
@@ -143,6 +147,17 @@ test("a pass from a pull request, another workflow, another ref, another branch,
   }
 });
 
+test("the action fails if a tag has the branch's name, but not if a tag's name only starts with the branch's name", async () => {
+  const runs = { [sha(5)]: [passed], [sha(3)]: [passed] };
+  for (const checkOnly of [false, true]) {
+    await assert.rejects(
+      choose(github({ history: linear, runs, tags: ["main"] }), { checkOnly }),
+      /^Error: The repository has a tag named main\. A run for this tag has the same branch and the same workflow path as a run on the branch\. Nothing was deployed\. Delete the tag to deploy again\.$/,
+    );
+  }
+  assert.equal(await choose(github({ history: linear, runs, tags: ["main-1"] })), sha(5));
+});
+
 test("a run that someone started by hand on the branch counts, like a push run", async () => {
   const gh = github({ history: linear, runs: { [sha(3)]: [run([job("success")], { event: "workflow_dispatch" })] } });
   assert.equal(await passes(gh, sha(3)), true);
@@ -198,11 +213,11 @@ test("a scan of all the history that the action can read makes at most two reque
 
   const usual = scan([failed]);
   assert.equal(await choose(usual, { sha: "" }), sha(1));
-  assert.equal(usual.routes.length, 1 + lib.MAX_HISTORY_PAGES + count + 1);
+  assert.equal(usual.routes.length, 2 + lib.MAX_HISTORY_PAGES + count + 1);
 
   const worst = scan([failed, otherWorkflow]);
   assert.equal(await choose(worst, { sha: "" }), sha(1));
-  assert.equal(worst.routes.length, 1 + lib.MAX_HISTORY_PAGES + 2 * count);
+  assert.equal(worst.routes.length, 2 + lib.MAX_HISTORY_PAGES + 2 * count);
   assert.ok(worst.routes.length < lib.MAX_REQUESTS);
 });
 
