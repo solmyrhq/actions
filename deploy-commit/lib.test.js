@@ -6,15 +6,24 @@ const lib = require("./lib.js");
 
 const REPOSITORY = "solmyrhq/x";
 const CHECK = "Lint and test";
+const WORKFLOW = "ci.yml";
 const REF = "refs/heads/main";
+const ACTIONS_APP = 15368;
 
 const sha = (n) => n.toString(16).padStart(40, "0");
 
-const passed = { conclusion: "success", app: { id: lib.GITHUB_ACTIONS_APP_ID } };
-const failed = { conclusion: "failure", app: { id: lib.GITHUB_ACTIONS_APP_ID } };
+const job = (conclusion, name = CHECK) => ({ name, conclusion });
+const run = (jobs, overrides = {}) => ({ event: "push", branch: "main", repository: REPOSITORY, workflow: WORKFLOW, jobs, ...overrides });
+const passed = run([job("success")]);
+const failed = run([job("failure")]);
 
-function github({ history, runs = {} }) {
+function github({ history, runs = {}, lax = false, tags = [] }) {
   const commits = history.map(([commit, ...parents]) => ({ sha: commit, parents: parents.map((parent) => ({ sha: parent })) }));
+  const all = Object.entries(runs).flatMap(([commit, specs]) => specs.map((spec) => ({ ...spec, sha: commit })));
+  all.forEach((spec, index) => {
+    spec.id = index + 1;
+    if (!("suite" in spec)) spec.suite = 1000 + index;
+  });
   return {
     routes: [],
     async get(route) {
@@ -25,12 +34,56 @@ function github({ history, runs = {} }) {
       if (url.pathname === `/repos/${REPOSITORY}/git/ref/heads/main`) {
         return { object: { sha: commits[0].sha } };
       }
+      const matchingTags = new RegExp(`^/repos/${REPOSITORY}/git/matching-refs/tags/(.+)$`).exec(url.pathname);
+      if (matchingTags) {
+        return tags.filter((tag) => tag.startsWith(matchingTags[1])).map((tag) => ({ ref: `refs/tags/${tag}` }));
+      }
       if (url.pathname === `/repos/${REPOSITORY}/commits`) {
         return pageOf(commits);
       }
-      const checks = new RegExp(`^/repos/${REPOSITORY}/commits/([0-9a-f]{40})/check-runs$`).exec(url.pathname);
-      if (checks) {
-        return { check_runs: pageOf(runs[checks[1]] ?? []) };
+      const checkRuns = new RegExp(`^/repos/${REPOSITORY}/commits/([0-9a-f]{40})/check-runs$`).exec(url.pathname);
+      if (checkRuns) {
+        const query = url.searchParams;
+        const matching = all
+          .flatMap((spec) =>
+            spec.jobs.map((j) => ({
+              name: j.name,
+              conclusion: j.conclusion,
+              head_sha: spec.sha,
+              app: { id: spec.app ?? ACTIONS_APP },
+              check_suite: { id: spec.suite },
+            })),
+          )
+          .filter(
+            (checkRun) =>
+              lax ||
+              (checkRun.head_sha === checkRuns[1] &&
+                checkRun.name === query.get("check_name") &&
+                String(checkRun.app.id) === query.get("app_id")),
+          );
+        return { check_runs: pageOf(matching) };
+      }
+      const workflowRuns = new RegExp(`^/repos/${REPOSITORY}/actions/workflows/([^/]+)/runs$`).exec(url.pathname);
+      if (workflowRuns) {
+        const query = url.searchParams;
+        const matching = all.filter(
+          (spec) =>
+            lax ||
+            (spec.sha === query.get("head_sha") &&
+              spec.workflow === workflowRuns[1] &&
+              spec.branch === query.get("branch")),
+        );
+        return {
+          workflow_runs: pageOf(matching).map((spec) => ({
+            id: spec.id,
+            event: spec.event,
+            path: `.github/workflows/${spec.workflow}${spec.pathRef ?? ""}`,
+            head_sha: spec.sha,
+            head_branch: spec.branch,
+            head_repository: { full_name: spec.repository },
+            check_suite_id: spec.suite,
+          })),
+        };
       }
       throw new Error(`Unexpected route ${route}`);
     },
@@ -41,7 +94,19 @@ const linearOf = (count) => Array.from({ length: count }, (_, i) => count - i).m
 const linear = linearOf(5);
 
 const choose = (gh, overrides = {}) =>
-  lib.chooseDeployCommit({ github: gh, repository: REPOSITORY, ref: REF, branch: "main", sha: sha(3), checkName: CHECK, ...overrides });
+  lib.chooseDeployCommit({
+    github: gh,
+    repository: REPOSITORY,
+    ref: REF,
+    branch: "main",
+    workflow: WORKFLOW,
+    sha: sha(3),
+    jobName: CHECK,
+    ...overrides,
+  });
+
+const passes = (gh, commit) =>
+  lib.hasPassingRun({ github: gh, repository: REPOSITORY, sha: commit, branch: "main", workflow: WORKFLOW, jobName: CHECK });
 
 test("the tip is deployed when it is the given commit and it passed", async () => {
   const gh = github({ history: linear, runs: { [sha(5)]: [passed] } });
@@ -60,7 +125,155 @@ test("the given commit is deployed when no newer commit passed", async () => {
 
 test("a commit with no passing run is not deployed, even when a newer commit passed", async () => {
   const gh = github({ history: linear, runs: { [sha(5)]: [passed], [sha(3)]: [failed] } });
-  await assert.rejects(choose(gh), /No run of the "Lint and test" check by GitHub Actions on 0+3 has passed\./);
+  await assert.rejects(
+    choose(gh),
+    /^Error: 0+3 has not passed the "Lint and test" job in a run of ci\.yml that a push or a workflow_dispatch event started on main\.$/,
+  );
+});
+
+test("a pass from a pull request, another workflow, another ref, another branch, a fork or another commit does not count", async () => {
+  const elsewhere = [
+    failed,
+    run([job("success")], { event: "pull_request" }),
+    run([job("success")], { workflow: "deploy.yml" }),
+    run([job("success")], { pathRef: "@refs/tags/main" }),
+    run([job("success")], { pathRef: "@main" }),
+    run([job("success")], { branch: "feature" }),
+    run([job("success")], { repository: "someone/x" }),
+  ];
+  for (const lax of [false, true]) {
+    const gh = github({ history: linear, runs: { [sha(3)]: elsewhere, [sha(5)]: [passed] }, lax });
+    assert.equal(await passes(gh, sha(3)), false, `lax: ${lax}`);
+  }
+});
+
+test("the action fails if a tag has the branch's name, but not if a tag's name only starts with the branch's name", async () => {
+  const runs = { [sha(5)]: [passed], [sha(3)]: [passed] };
+  for (const checkOnly of [false, true]) {
+    await assert.rejects(
+      choose(github({ history: linear, runs, tags: ["main"] }), { checkOnly }),
+      /^Error: The repository has a tag named main\. A run for this tag has the same branch and the same workflow path as a run on the branch\. Nothing was deployed\. Delete the tag to deploy again\.$/,
+    );
+  }
+  assert.equal(await choose(github({ history: linear, runs, tags: ["main-1"] })), sha(5));
+});
+
+test("a run that someone started by hand on the branch counts, like a push run", async () => {
+  const gh = github({ history: linear, runs: { [sha(3)]: [run([job("success")], { event: "workflow_dispatch" })] } });
+  assert.equal(await passes(gh, sha(3)), true);
+});
+
+test("a run whose path names the workflow with a ref after it counts", async () => {
+  const gh = github({ history: linear, runs: { [sha(3)]: [run([job("success")], { pathRef: "@refs/heads/main" })] } });
+  assert.equal(await passes(gh, sha(3)), true);
+});
+
+test("the check runs are read first, then the runs of the workflow on the branch at the commit", async () => {
+  const gh = github({ history: linear, runs: { [sha(3)]: [passed] } });
+  assert.equal(await passes(gh, sha(3)), true);
+  assert.equal(gh.routes.length, 2);
+  const [checks, runs] = gh.routes.map((route) => new URL(route, "https://api.invalid"));
+  assert.equal(checks.pathname, `/repos/${REPOSITORY}/commits/${sha(3)}/check-runs`);
+  assert.equal(checks.searchParams.get("check_name"), CHECK);
+  assert.equal(checks.searchParams.get("app_id"), String(ACTIONS_APP));
+  assert.equal(checks.searchParams.get("filter"), "all");
+  assert.equal(runs.pathname, `/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/runs`);
+  assert.equal(runs.searchParams.get("event"), null);
+  assert.equal(runs.searchParams.get("branch"), "main");
+  assert.equal(runs.searchParams.get("head_sha"), sha(3));
+});
+
+test("one request is made for a commit with no successful check run of the job", async () => {
+  const gh = github({ history: linear, runs: { [sha(3)]: [failed, failed] } });
+  assert.equal(await passes(gh, sha(3)), false);
+  assert.equal(gh.routes.length, 1);
+});
+
+test("a check run of another job, from another app or on another commit does not count, on any page", async () => {
+  const filler = Array(lib.PAGE_SIZE).fill(job("success", "Another job"));
+  const elsewhere = github({
+    history: linear,
+    runs: { [sha(3)]: [run(filler), run([job("success")], { app: 1 })], [sha(5)]: [passed] },
+    lax: true,
+  });
+  assert.equal(await passes(elsewhere, sha(3)), false);
+  assert.equal(elsewhere.routes.length, 2);
+
+  const later = github({ history: linear, runs: { [sha(3)]: [run(filler), passed] }, lax: true });
+  assert.equal(await passes(later, sha(3)), true);
+});
+
+test("a scan of all the history that the action can read makes at most two requests for each commit, and fewer than MAX_REQUESTS, when each response has one page", async () => {
+  const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES;
+  const otherWorkflow = run([job("success")], { workflow: "deploy.yml" });
+  const scan = (failing) => {
+    const runs = Object.fromEntries(Array.from({ length: count }, (_, i) => [sha(i + 1), i === 0 ? [passed] : failing]));
+    return github({ history: linearOf(count), runs });
+  };
+
+  const usual = scan([failed]);
+  assert.equal(await choose(usual, { sha: "" }), sha(1));
+  assert.equal(usual.routes.length, 2 + lib.MAX_HISTORY_PAGES + count + 1);
+
+  const worst = scan([failed, otherWorkflow]);
+  assert.equal(await choose(worst, { sha: "" }), sha(1));
+  assert.equal(worst.routes.length, 2 + lib.MAX_HISTORY_PAGES + 2 * count);
+  assert.ok(worst.routes.length < lib.MAX_REQUESTS);
+});
+
+test("the action fails after MAX_REQUESTS requests and deploys nothing, even when responses have more than one page", async () => {
+  const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES;
+  const sameNameElsewhere = run(Array(lib.PAGE_SIZE + 1).fill(job("success")), { workflow: "deploy.yml" });
+  const runs = Object.fromEntries(Array.from({ length: count }, (_, i) => [sha(i + 1), i === 0 ? [passed] : [sameNameElsewhere]]));
+  const gh = github({ history: linearOf(count), runs });
+  await assert.rejects(
+    choose(gh, { sha: "" }),
+    new RegExp(`^Error: The action stopped after ${lib.MAX_REQUESTS} REST API requests, the most that a run can make\\. Nothing was deployed\\.`),
+  );
+  assert.equal(gh.routes.length, lib.MAX_REQUESTS);
+});
+
+test("a run counts only if its check suite has a successful check run of the job, on any page", async () => {
+  const first = github({ history: linear, runs: { [sha(3)]: [passed, failed] } });
+  assert.equal(await passes(first, sha(3)), true);
+  assert.equal(first.routes.length, 2);
+
+  const later = github({ history: linear, runs: { [sha(3)]: [...Array(lib.PAGE_SIZE).fill(failed), passed] } });
+  assert.equal(await passes(later, sha(3)), true);
+  assert.equal(later.routes.length, 4);
+
+  const noSuite = github({ history: linear, runs: { [sha(3)]: [run([job("success")], { suite: null })] } });
+  assert.equal(await passes(noSuite, sha(3)), false);
+
+  const pullRequest = run([job("success")], { event: "pull_request" });
+  const none = github({ history: linear, runs: { [sha(3)]: [run([job("success", "Another job"), job("failure")]), failed, pullRequest] } });
+  assert.equal(await passes(none, sha(3)), false);
+  assert.equal(none.routes.length, 2);
+});
+
+test("with check-only, the given commit is checked and returned, and newer commits are not read", async () => {
+  const gh = github({ history: linear, runs: { [sha(5)]: [passed], [sha(3)]: [passed] } });
+  assert.equal(await choose(gh, { checkOnly: true }), sha(3));
+  const checked = gh.routes.filter((route) => route.includes("/check-runs?")).map((route) => new URL(route, "https://api.invalid").pathname);
+  assert.deepEqual(checked, [`/repos/${REPOSITORY}/commits/${sha(3)}/check-runs`]);
+
+  await assert.rejects(choose(github({ history: linear, runs: { [sha(5)]: [passed] } }), { checkOnly: true }), /has not passed/);
+  await assert.rejects(choose(gh, { checkOnly: true, sha: sha(9) }), /is not on the branch's first-parent chain/);
+});
+
+test("with check-only and no commit given, nothing is checked and nothing is requested", async () => {
+  const gh = github({ history: linear });
+  assert.equal(await choose(gh, { checkOnly: true, sha: "" }), "");
+  assert.deepEqual(gh.routes, []);
+  await assert.rejects(choose(gh, { checkOnly: true, sha: "", ref: "refs/heads/feature" }), /This run is for refs\/heads\/feature/);
+});
+
+test("check-only must be true or false", () => {
+  assert.equal(lib.checkOnlyFlag("true"), true);
+  assert.equal(lib.checkOnlyFlag("false"), false);
+  for (const value of ["", "yes", "True", "1"]) {
+    assert.throws(() => lib.checkOnlyFlag(value), /is not a valid value for check-only/, value);
+  }
 });
 
 test("a commit that is on the branch only through the second parent of a merge is refused", async () => {
@@ -70,7 +283,7 @@ test("a commit that is on the branch only through the second parent of a merge i
   assert.equal(await choose(gh, { sha: sha(9) }), sha(9));
 });
 
-test("with no commit given, the newest commit that passed is deployed, even when the tip has no check run", async () => {
+test("with no commit given, the newest commit that passed is deployed, even when the tip has no run", async () => {
   const gh = github({ history: linear, runs: { [sha(4)]: [passed], [sha(3)]: [passed] } });
   assert.equal(await choose(gh, { sha: "" }), sha(4));
 });
@@ -87,16 +300,16 @@ test("with no commit given and a tip that passed, the branch's history is not re
 test("with no commit given, nothing is deployed when no commit in the history that the walk may read passed", async () => {
   await assert.rejects(
     choose(github({ history: linear, runs: { [sha(5)]: [failed] } }), { sha: "" }),
-    /^Error: No commit on the branch's first-parent chain has a run of the "Lint and test" check by GitHub Actions that passed\.$/,
+    /^Error: No commit on the branch's first-parent chain passed the "Lint and test" job in a run of ci\.yml that a push or a workflow_dispatch event started on main\.$/,
   );
   const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES + 2;
   await assert.rejects(
     choose(github({ history: linearOf(count) }), { sha: "" }),
-    new RegExp(`that passed\\. The action read only the newest ${lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES} commits of the branch's history\\.$`),
+    new RegExp(`started on main\\. The action read only the newest ${lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES} commits of the branch's history\\.$`),
   );
 });
 
-test("a short or upper-case SHA, a run for another ref and a bad branch name are refused before any request", async () => {
+test("a bad SHA, workflow or branch, and a run for another ref, are refused before any request", async () => {
   const gh = github({ history: linear });
   await assert.rejects(choose(gh, { sha: "abc1234" }), /is not a full commit SHA/);
   await assert.rejects(choose(gh, { sha: sha(3).toUpperCase().replace(/^0+/, "A") }), /is not a full commit SHA/);
@@ -104,31 +317,10 @@ test("a short or upper-case SHA, a run for another ref and a bad branch name are
   for (const branch of ["", "/main", "main/", "a..b", "main.lock", "main branch"]) {
     await assert.rejects(choose(gh, { branch, ref: `refs/heads/${branch}` }), /is not a branch name/, branch);
   }
+  for (const workflow of ["", "ci", "../ci.yml", "dir/ci.yml", "ci.yml?x=1"]) {
+    await assert.rejects(choose(gh, { workflow }), /is not a workflow file name/, workflow);
+  }
   assert.deepEqual(gh.routes, []);
-});
-
-test("a passing run is looked for on every page until one is found, and only a successful run by GitHub Actions counts", async () => {
-  const other = { conclusion: "success", app: { id: 1 } };
-  const check = (runs) => {
-    const gh = github({ history: linear, runs: { [sha(3)]: runs } });
-    return lib.hasPassingRun({ github: gh, repository: REPOSITORY, sha: sha(3), checkName: CHECK }).then((found) => ({ found, gh }));
-  };
-
-  const later = await check([...Array(lib.PAGE_SIZE).fill(failed), other, passed]);
-  assert.equal(later.found, true);
-  assert.equal(later.gh.routes.length, 2);
-  const query = new URL(later.gh.routes[0], "https://api.invalid").searchParams;
-  assert.equal(query.get("check_name"), CHECK);
-  assert.equal(query.get("filter"), "all");
-  assert.equal(query.get("app_id"), String(lib.GITHUB_ACTIONS_APP_ID));
-
-  const first = await check([passed, ...Array(lib.PAGE_SIZE + 1).fill(failed)]);
-  assert.equal(first.found, true);
-  assert.equal(first.gh.routes.length, 1);
-
-  const none = await check([...Array(lib.PAGE_SIZE).fill(failed), other]);
-  assert.equal(none.found, false);
-  assert.equal(none.gh.routes.length, 2);
 });
 
 test("the walk reads more of the branch's history only when it needs to, and stops after the last page it may read", async () => {
