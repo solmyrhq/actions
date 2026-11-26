@@ -36,7 +36,8 @@ function workflowFile(value) {
 const notOnChain = (sha) =>
   `${sha} is not on the branch's first-parent chain. If a merge put it on the branch, give the SHA of the merge commit.`;
 
-const passedIn = ({ jobName, workflow, branch }) => `the "${jobName}" job in a run of ${workflow} for a push to ${branch}`;
+const passedIn = ({ jobName, workflow, branch }) =>
+  `the "${jobName}" job in a run of ${workflow} that a push or a workflow_dispatch event started on ${branch}`;
 
 async function hasPassingJob({ github, repository, runId, jobName }) {
   for (let page = 1; ; page += 1) {
@@ -47,21 +48,24 @@ async function hasPassingJob({ github, repository, runId, jobName }) {
   }
 }
 
-// Returns whether a job named `jobName` passed in a run of `workflow` for a
-// push of `sha` to `branch`. It counts the jobs of every attempt, because a
-// commit that passed and then failed a rerun can already be in production.
+const BRANCH_EVENTS = new Set(["push", "workflow_dispatch"]);
+
+// Returns whether a job named `jobName` passed for `sha` in a push or
+// workflow_dispatch run of `workflow` on `branch`. It counts the jobs of every
+// attempt, because a commit that passed and then failed a rerun can already be
+// in production.
 async function hasPassingRun({ github, repository, sha, branch, workflow, jobName }) {
   for (let page = 1; ; page += 1) {
-    const query = new URLSearchParams({ branch, event: "push", head_sha: sha, per_page: String(PAGE_SIZE), page: String(page) });
+    const query = new URLSearchParams({ branch, head_sha: sha, per_page: String(PAGE_SIZE), page: String(page) });
     const { workflow_runs: runs } = await github.get(`/repos/${repository}/actions/workflows/${workflow}/runs?${query}`);
     for (const run of runs) {
-      const pushed =
-        run.event === "push" &&
-        run.path === `.github/workflows/${workflow}` &&
+      const onBranch =
+        BRANCH_EVENTS.has(run.event) &&
+        run.path?.replace(/@.*$/, "") === `.github/workflows/${workflow}` &&
         run.head_sha === sha &&
         run.head_branch === branch &&
         run.head_repository?.full_name === repository;
-      if (pushed && (await hasPassingJob({ github, repository, runId: run.id, jobName }))) return true;
+      if (onBranch && (await hasPassingJob({ github, repository, runId: run.id, jobName }))) return true;
     }
     if (runs.length < PAGE_SIZE) return false;
   }
@@ -136,12 +140,11 @@ async function newestPassing({ github, repository, tip, branch, workflow, jobNam
   throw new Error(none);
 }
 
-// Returns the newest commit on `branch`'s first-parent chain, from `sha` to the
-// tip, that passed `jobName` in a run of `workflow` for a push to `branch`.
-// Throws unless `branch`, `workflow` and `sha` are valid, `ref` is
-// `refs/heads/<branch>`, `sha` is on the chain, and `sha` passed. If `sha` is
-// empty, returns the newest commit on the chain that passed instead, and
-// throws if none did.
+// Returns the newest commit on `branch`'s first-parent chain, from the tip
+// down to `sha`, that passed `jobName`. Throws unless `branch`, `workflow`
+// and `sha` are well formed, `ref` is `refs/heads/<branch>`, `sha` is on the
+// chain, and `sha` itself passed. With an empty `sha`, returns the newest
+// commit on the chain that passed, and throws if none did.
 async function chooseDeployCommit({ github, repository, ref, branch, workflow, sha, jobName }) {
   branchName(branch);
   workflowFile(workflow);

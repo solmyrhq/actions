@@ -43,14 +43,13 @@ function github({ history, runs = {}, lax = false }) {
             lax ||
             (spec.sha === query.get("head_sha") &&
               spec.workflow === workflowRuns[1] &&
-              spec.event === query.get("event") &&
               spec.branch === query.get("branch")),
         );
         return {
           workflow_runs: pageOf(matching).map((spec) => ({
             id: spec.id,
             event: spec.event,
-            path: `.github/workflows/${spec.workflow}`,
+            path: `.github/workflows/${spec.workflow}${spec.pathRef ?? ""}`,
             head_sha: spec.sha,
             head_branch: spec.branch,
             head_repository: { full_name: spec.repository },
@@ -103,7 +102,7 @@ test("a commit with no passing run is not deployed, even when a newer commit pas
   const gh = github({ history: linear, runs: { [sha(5)]: [passed], [sha(3)]: [failed] } });
   await assert.rejects(
     choose(gh),
-    /^Error: 0+3 has not passed the "Lint and test" job in a run of ci\.yml for a push to main\.$/,
+    /^Error: 0+3 has not passed the "Lint and test" job in a run of ci\.yml that a push or a workflow_dispatch event started on main\.$/,
   );
 });
 
@@ -120,12 +119,22 @@ test("a pass from a pull request, another workflow, another branch, a fork or an
   }
 });
 
-test("the run list is asked for push runs of the workflow on the branch at the commit", async () => {
+test("a run that someone started by hand on the branch counts, like a push run", async () => {
+  const gh = github({ history: linear, runs: { [sha(3)]: [run([job("success")], { event: "workflow_dispatch" })] } });
+  assert.equal(await passes(gh, sha(3)), true);
+});
+
+test("a run whose path names the workflow with a ref after it counts", async () => {
+  const gh = github({ history: linear, runs: { [sha(3)]: [run([job("success")], { pathRef: "@refs/heads/main" })] } });
+  assert.equal(await passes(gh, sha(3)), true);
+});
+
+test("the run list is asked for runs of the workflow on the branch at the commit", async () => {
   const gh = github({ history: linear, runs: { [sha(3)]: [passed] } });
   assert.equal(await passes(gh, sha(3)), true);
   const url = new URL(gh.routes[0], "https://api.invalid");
   assert.equal(url.pathname, `/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/runs`);
-  assert.equal(url.searchParams.get("event"), "push");
+  assert.equal(url.searchParams.get("event"), null);
   assert.equal(url.searchParams.get("branch"), "main");
   assert.equal(url.searchParams.get("head_sha"), sha(3));
   assert.equal(new URL(gh.routes[1], "https://api.invalid").searchParams.get("filter"), "all");
@@ -170,12 +179,12 @@ test("with no commit given and a tip that passed, the branch's history is not re
 test("with no commit given, nothing is deployed when no commit in the history that the walk may read passed", async () => {
   await assert.rejects(
     choose(github({ history: linear, runs: { [sha(5)]: [failed] } }), { sha: "" }),
-    /^Error: No commit on the branch's first-parent chain passed the "Lint and test" job in a run of ci\.yml for a push to main\.$/,
+    /^Error: No commit on the branch's first-parent chain passed the "Lint and test" job in a run of ci\.yml that a push or a workflow_dispatch event started on main\.$/,
   );
   const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES + 2;
   await assert.rejects(
     choose(github({ history: linearOf(count) }), { sha: "" }),
-    new RegExp(`for a push to main\\. The action read only the newest ${lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES} commits of the branch's history\\.$`),
+    new RegExp(`started on main\\. The action read only the newest ${lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES} commits of the branch's history\\.$`),
   );
 });
 

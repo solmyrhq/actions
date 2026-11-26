@@ -1,10 +1,10 @@
 name: Choose the commit to deploy
 description: >-
   Checks that a commit is on the first-parent chain of the deployed branch,
-  and that a job passed in a run of the given workflow for a push of the
-  commit to the branch. Outputs the newest commit on that chain that passed
-  the job. This commit can be newer than the given commit. If no commit is
-  given, outputs the newest commit on the chain that passed the job.
+  and that a job passed in a run of the given workflow for that commit on the
+  branch. Outputs the newest commit on that chain that passed the job. This
+  commit can be newer than the given commit. If no commit is given, outputs
+  the newest commit on the chain that passed the job.
 
 inputs:
   token:
@@ -19,9 +19,10 @@ inputs:
     description: >-
       The file name of the workflow that runs the `job-name` job, such as
       `ci.yml`. Do not include the directory. The action counts only the runs
-      of this workflow that a push to `branch` started. The run of a pull
-      request tests the merge of the pull request into its base branch, and
-      this merge can differ from the commit on `branch`.
+      of this workflow on `branch` that a push or a `workflow_dispatch` event
+      started. The run of a pull request tests the merge of the pull request
+      into its base branch, and this merge can differ from the commit on
+      `branch`.
     required: true
   job-name:
     description: >-
