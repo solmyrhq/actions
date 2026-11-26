@@ -9,8 +9,8 @@ description: >-
 inputs:
   token:
     description: >-
-      A token with the `contents: read` and `actions: read` permissions, such as
-      the job's GITHUB_TOKEN.
+      A token with the `contents: read`, `actions: read` and `checks: read`
+      permissions, such as the job's GITHUB_TOKEN.
     required: true
   branch:
     description: The deployed branch, such as `main`. The action fails if the run is for another ref.
@@ -38,6 +38,15 @@ inputs:
       that passed the `job-name` job.
     required: false
     default: ""
+  check-only:
+    description: >-
+      `true` or `false`. The action fails for any other value. If this is
+      `true`, the action checks `sha` and outputs `sha`. It does not look for
+      a newer commit that passed. If `sha` is also empty, the action checks
+      nothing and outputs an empty `sha`. Set this to `true` in a job that
+      runs before the deploy job, when the deploy job also runs the action.
+    required: false
+    default: "false"
 
 outputs:
   sha:
@@ -46,7 +55,7 @@ outputs:
       first-parent chain of `branch`, from `sha` to the tip, that passed the
       `job-name` job. If no commit newer than `sha` passed, it is `sha`. If
       `sha` is empty, it is the newest commit on the chain that passed the
-      `job-name` job.
+      `job-name` job. If `check-only` is `true`, it is `sha`.
 
 runs:
   using: node24

@@ -48,6 +48,28 @@ async function hasPassingJob({ github, repository, runId, jobName }) {
   }
 }
 
+const GITHUB_ACTIONS_APP_ID = 15368;
+
+async function hasSucceededCheckRun({ github, repository, sha, jobName }) {
+  for (let page = 1; ; page += 1) {
+    const query = new URLSearchParams({
+      check_name: jobName,
+      app_id: String(GITHUB_ACTIONS_APP_ID),
+      filter: "all",
+      per_page: String(PAGE_SIZE),
+      page: String(page),
+    });
+    const { check_runs: checkRuns } = await github.get(`/repos/${repository}/commits/${sha}/check-runs?${query}`);
+    const succeeded = (checkRun) =>
+      checkRun.name === jobName &&
+      checkRun.conclusion === "success" &&
+      checkRun.head_sha === sha &&
+      checkRun.app?.id === GITHUB_ACTIONS_APP_ID;
+    if (checkRuns.some(succeeded)) return true;
+    if (checkRuns.length < PAGE_SIZE) return false;
+  }
+}
+
 const BRANCH_EVENTS = new Set(["push", "workflow_dispatch"]);
 
 // Returns whether a job named `jobName` passed for `sha` in a push or
@@ -55,6 +77,7 @@ const BRANCH_EVENTS = new Set(["push", "workflow_dispatch"]);
 // attempt, because a commit that passed and then failed a rerun can already be
 // in production.
 async function hasPassingRun({ github, repository, sha, branch, workflow, jobName }) {
+  if (!(await hasSucceededCheckRun({ github, repository, sha, jobName }))) return false;
   for (let page = 1; ; page += 1) {
     const query = new URLSearchParams({ branch, head_sha: sha, per_page: String(PAGE_SIZE), page: String(page) });
     const { workflow_runs: runs } = await github.get(`/repos/${repository}/actions/workflows/${workflow}/runs?${query}`);
@@ -140,18 +163,30 @@ async function newestPassing({ github, repository, tip, branch, workflow, jobNam
   throw new Error(none);
 }
 
+function checkOnlyFlag(value) {
+  if (value !== "true" && value !== "false") {
+    throw new Error(`${JSON.stringify(value)} is not a valid value for check-only. Give "true" or "false".`);
+  }
+  return value === "true";
+}
+
 // Returns the newest commit on `branch`'s first-parent chain, from the tip
 // down to `sha`, that passed `jobName`. Throws unless `branch`, `workflow`
 // and `sha` are well formed, `ref` is `refs/heads/<branch>`, `sha` is on the
 // chain, and `sha` itself passed. With an empty `sha`, returns the newest
 // commit on the chain that passed, and throws if none did.
-async function chooseDeployCommit({ github, repository, ref, branch, workflow, sha, jobName }) {
+//
+// With `checkOnly`, returns `sha` after those checks and reads no runs of
+// newer commits. With `checkOnly` and an empty `sha`, returns an empty string
+// and makes no request.
+async function chooseDeployCommit({ github, repository, ref, branch, workflow, sha, jobName, checkOnly = false }) {
   branchName(branch);
   workflowFile(workflow);
   if (ref !== `refs/heads/${branch}`) {
     throw new Error(`This run is for ${ref}. The action runs only for refs/heads/${branch}.`);
   }
   if (sha !== "") commitSha(sha);
+  if (checkOnly && sha === "") return "";
 
   const { object } = await github.get(`/repos/${repository}/git/ref/heads/${branch}`);
   const tip = commitSha(object.sha);
@@ -162,6 +197,7 @@ async function chooseDeployCommit({ github, repository, ref, branch, workflow, s
   if (!(await hasPassingRun({ github, repository, sha, branch, workflow, jobName }))) {
     throw new Error(`${sha} has not passed ${passedIn({ jobName, workflow, branch })}.`);
   }
+  if (checkOnly) return sha;
   for (const commit of newer) {
     if (await hasPassingRun({ github, repository, sha: commit, branch, workflow, jobName })) return commit;
   }
@@ -174,6 +210,7 @@ module.exports = {
   commitSha,
   branchName,
   workflowFile,
+  checkOnlyFlag,
   passedIn,
   hasPassingRun,
   firstParentsAfter,

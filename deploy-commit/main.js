@@ -9,6 +9,7 @@ run(async () => {
   const workflow = input("workflow");
   const jobName = input("job-name");
   const requested = input("sha", { required: false });
+  const checkOnly = lib.checkOnlyFlag(input("check-only"));
 
   const sha = await lib.chooseDeployCommit({
     github: runnerClient(input("token")),
@@ -18,9 +19,14 @@ run(async () => {
     workflow,
     sha: requested,
     jobName,
+    checkOnly,
   });
   const passed = `passed ${lib.passedIn({ jobName, workflow, branch })}`;
-  if (requested === "") {
+  if (checkOnly && requested === "") {
+    info("No commit was given. There is nothing to check.");
+  } else if (checkOnly) {
+    info(`${sha} is on the first-parent chain of ${branch}. It ${passed}.`);
+  } else if (requested === "") {
     info(`The commit to deploy is ${sha}, the newest commit on the first-parent chain of ${branch} that ${passed}.`);
   } else if (sha === requested) {
     info(`The commit to deploy is ${sha}. It ${passed}.`);
