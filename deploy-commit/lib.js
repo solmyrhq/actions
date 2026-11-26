@@ -2,8 +2,7 @@
 
 const SHA = /^[0-9a-f]{40}$/;
 const BRANCH = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
-
-const GITHUB_ACTIONS_APP_ID = 15368;
+const WORKFLOW = /^[A-Za-z0-9._-]+\.ya?ml$/;
 
 const PAGE_SIZE = 100;
 
@@ -25,23 +24,45 @@ function branchName(value) {
   return value;
 }
 
+function workflowFile(value) {
+  if (typeof value !== "string" || !WORKFLOW.test(value)) {
+    throw new Error(
+      `${JSON.stringify(value)} is not a workflow file name that this action accepts. Give only the file name, such as "ci.yml", with no directory. Use only ASCII letters, digits, ".", "_" and "-", and end the name in ".yml" or ".yaml".`,
+    );
+  }
+  return value;
+}
+
 const notOnChain = (sha) =>
   `${sha} is not on the branch's first-parent chain. If a merge put it on the branch, give the SHA of the merge commit.`;
 
-// Returns whether a run of `checkName` by GitHub Actions on `sha` passed.
-// Counts every attempt, not only the latest: a commit that passed and then
-// failed a rerun can already be in production.
-async function hasPassingRun({ github, repository, sha, checkName }) {
+const passedIn = ({ jobName, workflow, branch }) => `the "${jobName}" job in a run of ${workflow} for a push to ${branch}`;
+
+async function hasPassingJob({ github, repository, runId, jobName }) {
   for (let page = 1; ; page += 1) {
-    const query = new URLSearchParams({
-      check_name: checkName,
-      filter: "all",
-      app_id: String(GITHUB_ACTIONS_APP_ID),
-      per_page: String(PAGE_SIZE),
-      page: String(page),
-    });
-    const { check_runs: runs } = await github.get(`/repos/${repository}/commits/${sha}/check-runs?${query}`);
-    if (runs.some((run) => run.conclusion === "success" && run.app?.id === GITHUB_ACTIONS_APP_ID)) return true;
+    const query = new URLSearchParams({ filter: "all", per_page: String(PAGE_SIZE), page: String(page) });
+    const { jobs } = await github.get(`/repos/${repository}/actions/runs/${runId}/jobs?${query}`);
+    if (jobs.some((job) => job.name === jobName && job.conclusion === "success")) return true;
+    if (jobs.length < PAGE_SIZE) return false;
+  }
+}
+
+// Returns whether a job named `jobName` passed in a run of `workflow` for a
+// push of `sha` to `branch`. It counts the jobs of every attempt, because a
+// commit that passed and then failed a rerun can already be in production.
+async function hasPassingRun({ github, repository, sha, branch, workflow, jobName }) {
+  for (let page = 1; ; page += 1) {
+    const query = new URLSearchParams({ branch, event: "push", head_sha: sha, per_page: String(PAGE_SIZE), page: String(page) });
+    const { workflow_runs: runs } = await github.get(`/repos/${repository}/actions/workflows/${workflow}/runs?${query}`);
+    for (const run of runs) {
+      const pushed =
+        run.event === "push" &&
+        run.path === `.github/workflows/${workflow}` &&
+        run.head_sha === sha &&
+        run.head_branch === branch &&
+        run.head_repository?.full_name === repository;
+      if (pushed && (await hasPassingJob({ github, repository, runId: run.id, jobName }))) return true;
+    }
     if (runs.length < PAGE_SIZE) return false;
   }
 }
@@ -100,13 +121,13 @@ async function firstParentsAfter({ github, repository, tip, sha }) {
 }
 
 // Returns the newest commit on the first-parent chain from `tip` that passed
-// `checkName`. Throws if no commit on the chain within the first
+// `jobName`. Throws if no commit on the chain within the first
 // MAX_HISTORY_PAGES pages of the branch's history passed.
-async function newestPassing({ github, repository, tip, checkName }) {
-  const none = `No commit on the branch's first-parent chain has a run of the "${checkName}" check by GitHub Actions that passed.`;
+async function newestPassing({ github, repository, tip, branch, workflow, jobName }) {
+  const none = `No commit on the branch's first-parent chain passed ${passedIn({ jobName, workflow, branch })}.`;
   try {
     for await (const commit of firstParentChain({ github, repository, tip })) {
-      if (await hasPassingRun({ github, repository, sha: commit, checkName })) return commit;
+      if (await hasPassingRun({ github, repository, sha: commit, branch, workflow, jobName })) return commit;
     }
   } catch (error) {
     if (!(error instanceof HistoryLimitError)) throw error;
@@ -116,12 +137,14 @@ async function newestPassing({ github, repository, tip, checkName }) {
 }
 
 // Returns the newest commit on `branch`'s first-parent chain, from `sha` to the
-// tip, that passed `checkName`. Throws unless `branch` and `sha` are valid, `ref`
-// is `refs/heads/<branch>`, `sha` is on the chain, and `sha` passed `checkName`.
-// If `sha` is empty, returns the newest commit on the chain that passed
-// `checkName` instead, and throws if none did.
-async function chooseDeployCommit({ github, repository, ref, branch, sha, checkName }) {
+// tip, that passed `jobName` in a run of `workflow` for a push to `branch`.
+// Throws unless `branch`, `workflow` and `sha` are valid, `ref` is
+// `refs/heads/<branch>`, `sha` is on the chain, and `sha` passed. If `sha` is
+// empty, returns the newest commit on the chain that passed instead, and
+// throws if none did.
+async function chooseDeployCommit({ github, repository, ref, branch, workflow, sha, jobName }) {
   branchName(branch);
+  workflowFile(workflow);
   if (ref !== `refs/heads/${branch}`) {
     throw new Error(`This run is for ${ref}. The action runs only for refs/heads/${branch}.`);
   }
@@ -129,25 +152,26 @@ async function chooseDeployCommit({ github, repository, ref, branch, sha, checkN
 
   const { object } = await github.get(`/repos/${repository}/git/ref/heads/${branch}`);
   const tip = commitSha(object.sha);
-  if (sha === "") return newestPassing({ github, repository, tip, checkName });
+  if (sha === "") return newestPassing({ github, repository, tip, branch, workflow, jobName });
 
   const newer = await firstParentsAfter({ github, repository, tip, sha });
 
-  if (!(await hasPassingRun({ github, repository, sha, checkName }))) {
-    throw new Error(`No run of the "${checkName}" check by GitHub Actions on ${sha} has passed.`);
+  if (!(await hasPassingRun({ github, repository, sha, branch, workflow, jobName }))) {
+    throw new Error(`${sha} has not passed ${passedIn({ jobName, workflow, branch })}.`);
   }
   for (const commit of newer) {
-    if (await hasPassingRun({ github, repository, sha: commit, checkName })) return commit;
+    if (await hasPassingRun({ github, repository, sha: commit, branch, workflow, jobName })) return commit;
   }
   return sha;
 }
 
 module.exports = {
-  GITHUB_ACTIONS_APP_ID,
   MAX_HISTORY_PAGES,
   PAGE_SIZE,
   commitSha,
   branchName,
+  workflowFile,
+  passedIn,
   hasPassingRun,
   firstParentsAfter,
   newestPassing,

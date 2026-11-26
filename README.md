@@ -58,14 +58,15 @@ deploy:
         cancel-in-progress: false
     permissions:
         contents: read
-        checks: read
+        actions: read
     steps:
         - id: commit
           uses: solmyrhq/actions/deploy-commit@<commit sha>
           with:
               token: ${{ github.token }}
               branch: main
-              check-name: Lint and test
+              workflow: ci.yml
+              job-name: Lint and test
               sha: ${{ inputs.sha }}
         - run: ssh -F "$SSH_CONFIG" -i "$key_file" "$DEPLOY_USER@$DEPLOY_HOST" "app $DEPLOY_SHA"
           env:
@@ -74,14 +75,16 @@ deploy:
 
 The action does these steps in this order:
 
-1. It fails if `branch` is not a valid branch name, or if the run is not for `refs/heads/<branch>`. It fails if `sha` is not empty and is not a full commit SHA in lower case. If `sha` is empty, the action does not do steps 2 to 4. It reads the newest 500 commits of the branch's history, as in step 2. It outputs the newest commit on the first-parent chain of these commits that passed the check. If no commit on that chain passed, the action fails. This commit can be older than the tip of the branch. For example, if the push of the tip changes no file in the `paths` filter of the check's workflow, GitHub does not run the workflow. The tip then has no run of the check.
+1. It fails if `branch` is not a valid branch name, if `workflow` is not a file name that ends in `.yml` or `.yaml`, or if the run is not for `refs/heads/<branch>`. It fails if `sha` is not empty and is not a full commit SHA in lower case. If `sha` is empty, the action does not do steps 2 to 4. It reads the newest 500 commits of the branch's history, as in step 2. It outputs the newest commit on the first-parent chain of these commits that passed the `job-name` job, as in step 3. If no commit on that chain passed, the action fails. This commit can be older than the tip of the branch. For example, if the push of the tip changes no file in the `paths` filter of `workflow`, GitHub does not run `workflow`. The tip then has no run of `workflow`.
 2. It reads the newest 500 commits of the branch's history through the REST API, from the current tip of the branch. It fails if `sha` is not on the first-parent chain of these commits. A commit that is in the branch's history only through the second parent of a merge commit is not on the chain. To deploy that commit, give the SHA of the merge commit. If `sha` is further down the chain than these commits reach, the action also fails.
-3. It fails if no run of the `check-name` check on `sha` passed. It counts only the check runs that GitHub Actions created, because any other app with write access to checks can create a passing check run with the same name. It counts the runs of every attempt, because a commit that passed and then failed a rerun can already be in production.
-4. It outputs the newest commit on the first-parent chain, from `sha` to the tip, that passed the check. If no commit newer than `sha` passed, it outputs `sha`.
+3. It fails if no run of `workflow` for a push of `sha` to `branch` has a job named `job-name` that passed. It reads these runs and their jobs through the REST API. A run that a pull request started does not count, because that run tests the merge of the pull request into its base branch, and this merge can differ from `sha`. A job of the same name in another workflow does not count. The action counts the jobs of every attempt, because a commit that passed and then failed a rerun can already be in production.
+4. It outputs the newest commit on the first-parent chain, from `sha` to the tip, that passed the `job-name` job. If no commit newer than `sha` passed, it outputs `sha`.
 
-The action can output a commit newer than `sha` because GitHub keeps at most one pending job in a concurrency group. When another job joins the group, GitHub cancels the pending job, even if that job is for a newer commit. The deploy that runs last can therefore be for an older commit. Each deploy job deploys the newest commit that passed the check. Thus, unless someone force-pushes the branch, production does not go back to an older commit. After GitHub cancels a deploy, the next deploy deploys the commit of the cancelled deploy or a newer commit.
+The action can output a commit newer than `sha` because GitHub keeps at most one pending job in a concurrency group. When another job joins the group, GitHub cancels the pending job, even if that job is for a newer commit. The deploy that runs last can therefore be for an older commit. Each deploy job deploys the newest commit that passed the `job-name` job. Thus, unless someone force-pushes the branch, production does not go back to an older commit. After GitHub cancels a deploy, the next deploy deploys the commit of the cancelled deploy or a newer commit.
 
-Start the deploy from the workflow that runs the check. In that workflow, add a job that `needs` the job that runs the check. Run this job only for pushes to `branch`. In this job, run `gh workflow run` for the deploy workflow, and give the commit in the `sha` input. If `branch` is not the default branch of the repository, also give `--ref <branch>`. Without `--ref`, the deploy run is for the default branch, and step 1 fails. The token of this job needs the `actions: write` permission. An event that `GITHUB_TOKEN` causes usually starts no workflow run. A `workflow_dispatch` event is an exception. Do not start the deploy workflow on `push` with a job that waits for the check. On shared runners, the waiting job can hold the last free runner, and then the check cannot start.
+Run the action twice: once in a job before the deploy job, and once in the deploy job. Give the first job no concurrency group and the same permissions as the deploy job. Set `needs` in the deploy job to the first job. If `sha` is wrong, the first job fails, GitHub skips the deploy job, and the deploy job does not join the concurrency group. Without the first job, a deploy job with a wrong `sha` joins the group. If another deploy job is pending, GitHub cancels it. Then the deploy job with the wrong `sha` fails. The commit of the cancelled job is not deployed until a later deploy job succeeds. The first job needs no secret other than the job's `GITHUB_TOKEN`. Thus, it can run on shared runners.
+
+Start the deploy from `workflow`. In `workflow`, add a job that `needs` the `job-name` job. Run this job only for pushes to `branch`. In this job, run `gh workflow run` for the deploy workflow, and give the commit in the `sha` input. If `branch` is not the default branch of the repository, also give `--ref <branch>`. Without `--ref`, the deploy run is for the default branch, and step 1 fails. The token of this job needs the `actions: write` permission. An event that `GITHUB_TOKEN` causes usually starts no workflow run. A `workflow_dispatch` event is an exception. Do not start the deploy workflow on `push` with a job that waits for the `job-name` job. On shared runners, the waiting job can hold the last free runner, and then the `job-name` job cannot start.
 
 ## Review workflows
 

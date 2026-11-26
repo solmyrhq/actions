@@ -1,31 +1,40 @@
 name: Choose the commit to deploy
 description: >-
   Checks that a commit is on the first-parent chain of the deployed branch,
-  and that a run of a check that GitHub Actions created passed on the commit.
-  Outputs the newest commit on that chain that passed the check. This commit
-  can be newer than the given commit. If no commit is given, outputs the
-  newest commit on the chain that passed the check.
+  and that a job passed in a run of the given workflow for a push of the
+  commit to the branch. Outputs the newest commit on that chain that passed
+  the job. This commit can be newer than the given commit. If no commit is
+  given, outputs the newest commit on the chain that passed the job.
 
 inputs:
   token:
     description: >-
-      A token with the `contents: read` and `checks: read` permissions, such as
+      A token with the `contents: read` and `actions: read` permissions, such as
       the job's GITHUB_TOKEN.
     required: true
   branch:
     description: The deployed branch, such as `main`. The action fails if the run is for another ref.
     required: true
-  check-name:
+  workflow:
     description: >-
-      The name of the check run that must pass. For a job with a `name`, the
-      check run has the same name. For a job in a matrix or in a called
-      workflow, the check run has a longer name.
+      The file name of the workflow that runs the `job-name` job, such as
+      `ci.yml`. Do not include the directory. The action counts only the runs
+      of this workflow that a push to `branch` started. The run of a pull
+      request tests the merge of the pull request into its base branch, and
+      this merge can differ from the commit on `branch`.
+    required: true
+  job-name:
+    description: >-
+      The name of the job that must pass, in a run of `workflow`. This is the
+      job's `name`, or its ID if it has no `name`. For a job in a matrix or in
+      a called workflow, GitHub adds to the name. Use the name that the page of
+      the workflow run shows.
     required: true
   sha:
     description: >-
       The full SHA, in lower case, of the commit to check. If it is empty, the
       action outputs the newest commit on the first-parent chain of `branch`
-      that passed the check.
+      that passed the `job-name` job.
     required: false
     default: ""
 
@@ -34,8 +43,9 @@ outputs:
     description: >-
       The full SHA of the commit to deploy. This is the newest commit on the
       first-parent chain of `branch`, from `sha` to the tip, that passed the
-      check. If no commit newer than `sha` passed, it is `sha`. If `sha` is
-      empty, it is the newest commit on the chain that passed the check.
+      `job-name` job. If no commit newer than `sha` passed, it is `sha`. If
+      `sha` is empty, it is the newest commit on the chain that passed the
+      `job-name` job.
 
 runs:
   using: node24
