@@ -22,4 +22,11 @@ jobs:
         with:
             pr: ${{ inputs.pr }}
             guide: README.md
-        secrets: inherit
+        # Not `secrets: inherit`, which would hand review.yml every repository
+        # and organization secret, not only these.
+        secrets:
+            CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+            CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+            CLIPROXY_BASE_URL: ${{ secrets.CLIPROXY_BASE_URL }}
+            CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}

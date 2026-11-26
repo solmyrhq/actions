@@ -149,10 +149,15 @@ jobs:
         with:
             pr: ${{ inputs.pr }}
             guide: CLAUDE.md
-        secrets: inherit
+        secrets:
+            CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+            CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+            CLIPROXY_BASE_URL: ${{ secrets.CLIPROXY_BASE_URL }}
+            CODE_REVIEW_TS_OAUTH_SECRET: ${{ secrets.CODE_REVIEW_TS_OAUTH_SECRET }}
 ```
 
-The caller gives `review.yml` each permission that one of the three reviews needs. With `secrets: inherit`, the caller also gives `review.yml` all of the caller's secrets. Each job of `review.yml` gives its review only the permissions and the secrets that the review needs. In each review workflow, each job then gets only the permissions that the job needs. The reviews use these organization secrets: `CLAUDE_CODE_OAUTH_TOKEN` for the Claude review, `OPENROUTER_API_KEY` for the OpenCode review, and `CLIPROXY_API_KEY`, `CLIPROXY_BASE_URL` and `CODE_REVIEW_TS_OAUTH_SECRET` for the Codex review.
+In the caller, give `review.yml` each permission that one of the three reviews uses. Under `secrets:`, pass each secret that the reviews use by name. Do not use `secrets: inherit`. With `secrets: inherit`, GitHub passes every repository and organization secret that is available to the caller to `review.yml`. In `review.yml`, the `permissions:` and `secrets:` of each job contain only the permissions and the secrets that its review uses. In each review workflow, each job then gets only the permissions that the job uses. The reviews use these organization secrets: `CLAUDE_CODE_OAUTH_TOKEN` for the Claude review, `OPENROUTER_API_KEY` for the OpenCode review, and `CLIPROXY_API_KEY`, `CLIPROXY_BASE_URL` and `CODE_REVIEW_TS_OAUTH_SECRET` for the Codex review.
 
 `review.yml` refers to each review with a path that starts with `$/`. GitHub resolves `$/` to this repository, at the commit of `review.yml` that is running, whichever repository calls `review.yml`. Thus, when a caller pins `review.yml` to a commit, GitHub also runs the reviews from that commit.
 
