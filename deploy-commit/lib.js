@@ -118,18 +118,23 @@ class HistoryLimitError extends Error {
   }
 }
 
-// Yields the commits on the first-parent chain from `tip`, newest first, and
-// stops at the root. Yields each commit before it looks up that commit's
-// parents. Stopping at a commit then costs no request for them. Throws a
-// HistoryLimitError when the chain continues past the first
-// MAX_HISTORY_PAGES pages of the branch's history.
+// Yields the commits on the first-parent chain from `tip`, newest first, down
+// to the root, and looks up a commit's parents only when the caller asks for
+// the next commit. Throws a HistoryLimitError when the chain continues past its
+// newest MAX_HISTORY_PAGES * PAGE_SIZE commits, or when it would read more than
+// MAX_HISTORY_PAGES pages of the branch's history. Those pages also hold the
+// commits that merges brought in, so on a chain with merges the page limit can
+// stop it first.
 async function* firstParentChain({ github, repository, tip }) {
   const parents = new Map();
   let page = 0;
   let complete = false;
+  let yielded = 0;
   let current = tip;
   while (current !== undefined) {
+    if (yielded === MAX_HISTORY_PAGES * PAGE_SIZE) throw new HistoryLimitError();
     yield current;
+    yielded += 1;
     while (!parents.has(current)) {
       if (complete) return;
       if (page === MAX_HISTORY_PAGES) throw new HistoryLimitError();
