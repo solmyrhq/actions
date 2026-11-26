@@ -6,7 +6,7 @@ const WORKFLOW = /^[A-Za-z0-9._-]+\.ya?ml$/;
 
 const PAGE_SIZE = 100;
 
-const MAX_HISTORY_PAGES = 5;
+const MAX_HISTORY_PAGES = 3;
 
 function commitSha(value) {
   if (typeof value !== "string" || !SHA.test(value)) {
@@ -39,18 +39,12 @@ const notOnChain = (sha) =>
 const passedIn = ({ jobName, workflow, branch }) =>
   `the "${jobName}" job in a run of ${workflow} that a push or a workflow_dispatch event started on ${branch}`;
 
-async function hasPassingJob({ github, repository, runId, jobName }) {
-  for (let page = 1; ; page += 1) {
-    const query = new URLSearchParams({ filter: "all", per_page: String(PAGE_SIZE), page: String(page) });
-    const { jobs } = await github.get(`/repos/${repository}/actions/runs/${runId}/jobs?${query}`);
-    if (jobs.some((job) => job.name === jobName && job.conclusion === "success")) return true;
-    if (jobs.length < PAGE_SIZE) return false;
-  }
-}
-
 const GITHUB_ACTIONS_APP_ID = 15368;
 
-async function hasSucceededCheckRun({ github, repository, sha, jobName }) {
+// Each job of a workflow run is a check run in the run's own check suite, and
+// every attempt of the run adds its check runs to that same suite.
+async function suitesWithSucceededJob({ github, repository, sha, jobName }) {
+  const suites = new Set();
   for (let page = 1; ; page += 1) {
     const query = new URLSearchParams({
       check_name: jobName,
@@ -60,13 +54,16 @@ async function hasSucceededCheckRun({ github, repository, sha, jobName }) {
       page: String(page),
     });
     const { check_runs: checkRuns } = await github.get(`/repos/${repository}/commits/${sha}/check-runs?${query}`);
-    const succeeded = (checkRun) =>
-      checkRun.name === jobName &&
-      checkRun.conclusion === "success" &&
-      checkRun.head_sha === sha &&
-      checkRun.app?.id === GITHUB_ACTIONS_APP_ID;
-    if (checkRuns.some(succeeded)) return true;
-    if (checkRuns.length < PAGE_SIZE) return false;
+    for (const checkRun of checkRuns) {
+      const succeeded =
+        checkRun.name === jobName &&
+        checkRun.conclusion === "success" &&
+        checkRun.head_sha === sha &&
+        checkRun.app?.id === GITHUB_ACTIONS_APP_ID &&
+        Number.isInteger(checkRun.check_suite?.id);
+      if (succeeded) suites.add(checkRun.check_suite.id);
+    }
+    if (checkRuns.length < PAGE_SIZE) return suites;
   }
 }
 
@@ -77,7 +74,8 @@ const BRANCH_EVENTS = new Set(["push", "workflow_dispatch"]);
 // attempt, because a commit that passed and then failed a rerun can already be
 // in production.
 async function hasPassingRun({ github, repository, sha, branch, workflow, jobName }) {
-  if (!(await hasSucceededCheckRun({ github, repository, sha, jobName }))) return false;
+  const suites = await suitesWithSucceededJob({ github, repository, sha, jobName });
+  if (suites.size === 0) return false;
   for (let page = 1; ; page += 1) {
     const query = new URLSearchParams({ branch, head_sha: sha, per_page: String(PAGE_SIZE), page: String(page) });
     const { workflow_runs: runs } = await github.get(`/repos/${repository}/actions/workflows/${workflow}/runs?${query}`);
@@ -88,7 +86,7 @@ async function hasPassingRun({ github, repository, sha, branch, workflow, jobNam
         run.head_sha === sha &&
         run.head_branch === branch &&
         run.head_repository?.full_name === repository;
-      if (onBranch && (await hasPassingJob({ github, repository, runId: run.id, jobName }))) return true;
+      if (onBranch && suites.has(run.check_suite_id)) return true;
     }
     if (runs.length < PAGE_SIZE) return false;
   }
