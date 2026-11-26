@@ -127,11 +127,13 @@ test("a commit with no passing run is not deployed, even when a newer commit pas
   );
 });
 
-test("a pass from a pull request, another workflow, another branch, a fork or another commit does not count", async () => {
+test("a pass from a pull request, another workflow, another ref, another branch, a fork or another commit does not count", async () => {
   const elsewhere = [
     failed,
     run([job("success")], { event: "pull_request" }),
     run([job("success")], { workflow: "deploy.yml" }),
+    run([job("success")], { pathRef: "@refs/tags/main" }),
+    run([job("success")], { pathRef: "@main" }),
     run([job("success")], { branch: "feature" }),
     run([job("success")], { repository: "someone/x" }),
   ];
@@ -186,7 +188,7 @@ test("a check run of another job, from another app or on another commit does not
   assert.equal(await passes(later, sha(3)), true);
 });
 
-test("a scan of all the history that the action can read makes at most two requests for each commit, and fewer than 650 of the token's 1,000 requests an hour", async () => {
+test("a scan of all the history that the action can read makes at most two requests for each commit, and fewer than MAX_REQUESTS, when each response has one page", async () => {
   const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES;
   const otherWorkflow = run([job("success")], { workflow: "deploy.yml" });
   const scan = (failing) => {
@@ -201,7 +203,19 @@ test("a scan of all the history that the action can read makes at most two reque
   const worst = scan([failed, otherWorkflow]);
   assert.equal(await choose(worst, { sha: "" }), sha(1));
   assert.equal(worst.routes.length, 1 + lib.MAX_HISTORY_PAGES + 2 * count);
-  assert.ok(worst.routes.length < 650);
+  assert.ok(worst.routes.length < lib.MAX_REQUESTS);
+});
+
+test("the action fails after MAX_REQUESTS requests and deploys nothing, even when responses have more than one page", async () => {
+  const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES;
+  const sameNameElsewhere = run(Array(lib.PAGE_SIZE + 1).fill(job("success")), { workflow: "deploy.yml" });
+  const runs = Object.fromEntries(Array.from({ length: count }, (_, i) => [sha(i + 1), i === 0 ? [passed] : [sameNameElsewhere]]));
+  const gh = github({ history: linearOf(count), runs });
+  await assert.rejects(
+    choose(gh, { sha: "" }),
+    new RegExp(`^Error: The action stopped after ${lib.MAX_REQUESTS} REST API requests, the most that a run can make\\. Nothing was deployed\\.`),
+  );
+  assert.equal(gh.routes.length, lib.MAX_REQUESTS);
 });
 
 test("a run counts only if its check suite has a successful check run of the job, on any page", async () => {

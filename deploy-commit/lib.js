@@ -8,6 +8,25 @@ const PAGE_SIZE = 100;
 
 const MAX_HISTORY_PAGES = 3;
 
+// GITHUB_TOKEN allows 1,000 REST requests an hour per repository, and the
+// repository's other workflows share them.
+const MAX_REQUESTS = 650;
+
+function limited(github) {
+  let made = 0;
+  return {
+    async get(route) {
+      if (made === MAX_REQUESTS) {
+        throw new Error(
+          `The action stopped after ${MAX_REQUESTS} REST API requests, the most that a run can make. Nothing was deployed. Give the SHA of a newer commit that passed, so that the action reads fewer commits.`,
+        );
+      }
+      made += 1;
+      return github.get(route);
+    },
+  };
+}
+
 function commitSha(value) {
   if (typeof value !== "string" || !SHA.test(value)) {
     throw new Error(`${JSON.stringify(value)} is not a full commit SHA. Give all 40 hexadecimal characters, in lower case.`);
@@ -82,7 +101,7 @@ async function hasPassingRun({ github, repository, sha, branch, workflow, jobNam
     for (const run of runs) {
       const onBranch =
         BRANCH_EVENTS.has(run.event) &&
-        run.path?.replace(/@.*$/, "") === `.github/workflows/${workflow}` &&
+        [`.github/workflows/${workflow}`, `.github/workflows/${workflow}@refs/heads/${branch}`].includes(run.path) &&
         run.head_sha === sha &&
         run.head_branch === branch &&
         run.head_repository?.full_name === repository;
@@ -185,6 +204,7 @@ async function chooseDeployCommit({ github, repository, ref, branch, workflow, s
   }
   if (sha !== "") commitSha(sha);
   if (checkOnly && sha === "") return "";
+  github = limited(github);
 
   const { object } = await github.get(`/repos/${repository}/git/ref/heads/${branch}`);
   const tip = commitSha(object.sha);
@@ -204,6 +224,7 @@ async function chooseDeployCommit({ github, repository, ref, branch, workflow, s
 
 module.exports = {
   MAX_HISTORY_PAGES,
+  MAX_REQUESTS,
   PAGE_SIZE,
   commitSha,
   branchName,
