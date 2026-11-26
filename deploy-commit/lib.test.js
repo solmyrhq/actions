@@ -323,9 +323,34 @@ test("a bad SHA, workflow or branch, and a run for another ref, are refused befo
   assert.deepEqual(gh.routes, []);
 });
 
+test("the walk finds the oldest of the newest PAGE_SIZE * MAX_HISTORY_PAGES commits on the first-parent chain, and throws when given that commit's parent", async () => {
+  const window = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES;
+  const gh = github({ history: linearOf(window + 1) });
+  const walk = (target) => lib.firstParentsAfter({ github: gh, repository: REPOSITORY, tip: sha(window + 1), sha: target });
+
+  assert.equal((await walk(sha(2))).length, window - 1);
+  await assert.rejects(walk(sha(1)), new RegExp(`is not on the first-parent chain in the newest ${window} commits`));
+});
+
+test("the walk stops after the last page of history it may read, even when merges keep the first-parent chain shorter than the window", async () => {
+  const merges = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES / 2 + 10;
+  const merge = (n) => sha(10_000 + n);
+  const side = (n) => sha(20_000 + n);
+  const history = [];
+  for (let n = merges; n >= 1; n -= 1) {
+    history.push(n === 1 ? [merge(n)] : [merge(n), merge(n - 1), side(n)]);
+    history.push([side(n)]);
+  }
+  const gh = github({ history });
+
+  await assert.rejects(
+    lib.firstParentsAfter({ github: gh, repository: REPOSITORY, tip: merge(merges), sha: merge(1) }),
+    /is not on the first-parent chain in the newest \d+ commits of the branch's history/,
+  );
+  assert.equal(gh.routes.length, lib.MAX_HISTORY_PAGES);
+});
+
 test("the walk reads more of the branch's history only when it needs to, and stops after the last page it may read", async () => {
-  // Reaching sha(1) needs the parents of PAGE_SIZE * MAX_HISTORY_PAGES + 1
-  // commits, one more than the walk may read.
   const count = lib.PAGE_SIZE * lib.MAX_HISTORY_PAGES + 2;
   const gh = github({ history: linearOf(count) });
   const walk = (target) => lib.firstParentsAfter({ github: gh, repository: REPOSITORY, tip: sha(count), sha: target });
