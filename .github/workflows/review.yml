@@ -37,16 +37,16 @@ jobs:
         uses: $/.github/workflows/claude-review.yml
         permissions:
             contents: read
-            id-token: write
-            actions: read
+            id-token: write # to get the Claude GitHub App's token
+            actions: read # for claude-code-action's github_ci MCP server
         secrets:
             CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
     codex:
         uses: $/.github/workflows/codex-review.yml
         permissions:
-            contents: write
-            pull-requests: write
+            contents: write # to resolve the review's threads
+            pull-requests: write # to post the review
         with:
             pr: ${{ inputs.pr }}
             guide: ${{ inputs.guide }}
@@ -58,8 +58,8 @@ jobs:
     opencode:
         uses: $/.github/workflows/opencode-review.yml
         permissions:
-            contents: write
-            pull-requests: write
+            contents: write # to resolve the review's threads
+            pull-requests: write # to post the review
         with:
             pr: ${{ inputs.pr }}
             guide: ${{ inputs.guide }}

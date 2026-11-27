@@ -54,11 +54,9 @@ jobs:
             !github.event.pull_request.draft
         runs-on: [self-hosted, X64]
         timeout-minutes: 90
-        # claude-code-action exchanges an OIDC token for a Claude GitHub App
-        # token, and posts the review with the app token, not GITHUB_TOKEN.
         permissions:
             contents: read
-            id-token: write
+            id-token: write # claude-code-action exchanges an OIDC token for the Claude GitHub App's token.
             actions: read # claude-code-action skips its github_ci MCP server without this.
         steps:
             # claude-code-action posts every comment in

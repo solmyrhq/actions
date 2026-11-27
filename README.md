@@ -96,6 +96,24 @@ Run the action twice: once in a job before the deploy job, and once in the deplo
 
 Start the deploy from `workflow`. In `workflow`, add a job that `needs` the `job-name` job. Run this job only for a push to `branch` or a `workflow_dispatch` event on `branch`. In this job, run `gh workflow run` for the deploy workflow, and give the commit in the `sha` input. If `branch` is not the default branch of the repository, also give `--ref <branch>`. Without `--ref`, the deploy run is for the default branch, and step 1 fails. The token of this job needs the `actions: write` permission. An event that `GITHUB_TOKEN` causes usually starts no workflow run. A `workflow_dispatch` event is an exception. Do not start the deploy workflow on `push` with a job that waits for the `job-name` job. On shared runners, the waiting job can hold the last free runner, and then the `job-name` job cannot start. Add `workflow_dispatch` to the `on` triggers of `workflow`. Then, if GitHub does not run `workflow` for a push, you can start a run of `workflow` on `branch` by hand. For example, GitHub does not run `workflow` for a push with `[skip ci]` in the commit message. A run that you start by hand tests the tip of `branch` at that time. If the `job-name` job passes, the job that `needs` it starts the deploy.
 
+## zizmor
+
+The reusable workflow `.github/workflows/zizmor.yml` runs [zizmor](https://docs.zizmor.sh/) on the `.github/` directory of the repository that calls the workflow. It runs zizmor's offline audits with the pedantic persona. If zizmor reports a finding, the workflow fails. GitHub shows each finding as an annotation on the pull request. Call the workflow from a job of the repository's CI workflow. Replace `<commit sha>` with the SHA of a commit on the main branch of this repository.
+
+```yaml
+jobs:
+    zizmor:
+        uses: solmyrhq/actions/.github/workflows/zizmor.yml@<commit sha>
+        permissions:
+            contents: read
+```
+
+The job checks out only `.github/`. It installs zizmor from a release whose checksum is pinned. The job reads no secret, and its token has only the `contents: read` permission. In a private repository, the job runs on the self-hosted runners. In a public repository, it runs on a GitHub-hosted runner.
+
+Fix each finding. If the code at the location of a finding is correct as it is, add a `# zizmor: ignore[<audit>]` comment, and write the reason after it. Put the comment on its own line, in the step or job of the finding. Do not put the comment on a `uses:` line. On a `uses:` line, the comment is the version of the pinned action.
+
+The offline audits send no requests to GitHub. Thus, they do not find an action whose pinned commit is not in the repository of the action. They also do not find an action that has a published security advisory.
+
 ## Review workflows
 
 Three reusable workflows review a pull request with the `exhaustive-review` skill: `.github/workflows/claude-review.yml`, `.github/workflows/codex-review.yml` and `.github/workflows/opencode-review.yml`. A fourth reusable workflow, `.github/workflows/review.yml`, calls these three workflows. Each repository calls `review.yml` from one caller workflow in that repository. The caller runs on `pull_request_target` for pull requests. For `pull_request_target`, GitHub runs the caller from the base branch of the pull request. A pull request therefore cannot change the workflow that reviews it. No workflow reviews a draft pull request or a pull request from a fork. Under `pull_request_target`, the job for a pull request from a fork would get the secrets of the repository.
@@ -220,7 +238,7 @@ In a manual run of the caller (`workflow_dispatch`), the review job of the Claud
 
 ### Change a review
 
-When a pull request changes a review workflow, or an action that a review workflow uses, GitHub runs the previous version of the review on that pull request, because the caller runs from the base branch. In this repository, the caller refers to `review.yml` by a local path, and GitHub runs the changed version for the first time on the next pull request after the merge. In every other repository, the caller refers to `review.yml` at a pinned commit SHA, and GitHub runs the reviews from that commit. GitHub runs the changed version there only after you change that pin.
+When a pull request changes a review workflow, or an action that a review workflow uses, GitHub runs the previous version of the review on that pull request, because the caller runs from the base branch. In this repository, the path to `review.yml` in the caller starts with `$/`. GitHub resolves `$/` to this repository, at the commit of the caller that is running. This commit is on the base branch. Thus, GitHub runs the changed version only in the reviews that start after the merge. These include the reviews of pull requests that were opened before the merge. In every other repository, the caller refers to `review.yml` at a pinned commit SHA, and GitHub runs the reviews from that commit. GitHub runs the changed version there only after you change that pin.
 
 In each review workflow, each action from this repository is pinned to a full commit SHA. Pull requests in this repository can be merged only as squash commits, and GitHub deletes the branch of a pull request when the pull request is merged. Thus, to change an action that a workflow uses, you must use two pull requests in this repository, and then one pull request in each repository that calls `review.yml`:
 
