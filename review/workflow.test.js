@@ -68,10 +68,10 @@ test("review.yml calls each review workflow once, with a path that starts with $
   }
 });
 
-test("every other reusable workflow in this repository is a review workflow that review.yml calls", () => {
+test("every other reusable workflow in this repository, apart from zizmor.yml, is a review workflow that review.yml calls", () => {
   const reusable = fs
     .readdirSync(WORKFLOWS)
-    .filter((file) => file !== "review.yml")
+    .filter((file) => file !== "review.yml" && file !== "zizmor.yml")
     .filter((file) => /\non:\n {4}workflow_call:\n/.test(fs.readFileSync(path.join(WORKFLOWS, file), "utf8")));
   assert.deepEqual(reusable.sort(), Object.values(REVIEWS).sort());
 });
@@ -106,11 +106,11 @@ test("review.yml passes pr and guide to the Codex and OpenCode reviews, and no i
   assert.deepEqual(jobBlock(DISPATCHER.job("claude"), "with"), {});
 });
 
-test("code-review.yml calls review.yml by a local path on pull_request_target and workflow_dispatch, with no top-level permissions", () => {
+test("code-review.yml runs on pull_request_target and workflow_dispatch, sets no top-level permissions, and calls review.yml with a path that starts with $/", () => {
   assert.match(CALLER.text, /\n {4}pull_request_target:\n/);
   assert.match(CALLER.text, /\n {4}workflow_dispatch:\n/);
   assert.match(CALLER.text, /\npermissions: \{\}\n/);
-  assert.ok(CALLER.job("review").includes("\n        uses: ./.github/workflows/review.yml\n"));
+  assert.ok(CALLER.job("review").includes("\n        uses: $/.github/workflows/review.yml\n"));
 });
 
 test("the permissions of code-review.yml are the union of the permissions of review.yml's jobs", () => {

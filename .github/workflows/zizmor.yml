@@ -1,0 +1,49 @@
+name: zizmor
+
+on:
+    workflow_call:
+
+permissions: {}
+
+jobs:
+    audit:
+        name: Audit the workflows with zizmor
+        runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted", "X64"]') || 'ubuntu-latest' }}
+        timeout-minutes: 10
+        permissions:
+            contents: read
+        steps:
+            - name: Check out .github/
+              timeout-minutes: 2
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
+                  sparse-checkout: .github
+
+            # sha256 is the digest that GitHub shows for the release asset.
+            - name: Install zizmor
+              id: install
+              timeout-minutes: 3
+              run: |
+                  version=1.33.1
+                  sha256=3e6a301c7a820a2501915f5a9de8c0486da82bdec7965f068477538a98743d43
+                  dir="$RUNNER_TEMP/zizmor"
+                  mkdir -p "$dir"
+                  curl --fail --silent --show-error --location \
+                      "https://github.com/zizmorcore/zizmor/releases/download/v$version/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+                      --output "$dir/zizmor.tgz"
+                  printf '%s  %s\n' "$sha256" "$dir/zizmor.tgz" | sha256sum --check --strict
+                  tar --extract --gzip --file "$dir/zizmor.tgz" --directory "$dir" zizmor
+                  rm "$dir/zizmor.tgz"
+                  echo "zizmor=$dir/zizmor" >> "$GITHUB_OUTPUT"
+
+            - name: Audit .github/
+              timeout-minutes: 4
+              env:
+                  ZIZMOR: ${{ steps.install.outputs.zizmor }}
+              run: '"$ZIZMOR" --offline --persona=pedantic --no-progress --format=github .github'
+
+            - name: Remove zizmor
+              if: always()
+              timeout-minutes: 1
+              run: rm -rf "$RUNNER_TEMP/zizmor"

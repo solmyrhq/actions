@@ -1,6 +1,7 @@
 name: Code Review
 
 on:
+    # zizmor: ignore[dangerous-triggers] The one job only calls review.yml at this commit, and every review that it calls skips pull requests from forks.
     pull_request_target:
         types: [opened, synchronize, ready_for_review, reopened]
     workflow_dispatch:
@@ -13,12 +14,12 @@ permissions: {}
 
 jobs:
     review:
-        uses: ./.github/workflows/review.yml
+        uses: $/.github/workflows/review.yml
         permissions:
-            actions: read
-            contents: write
-            id-token: write
-            pull-requests: write
+            actions: read # for the Claude review
+            contents: write # for the Codex and OpenCode reviews
+            id-token: write # for the Claude review
+            pull-requests: write # for the Codex and OpenCode reviews
         with:
             pr: ${{ inputs.pr }}
             guide: README.md
